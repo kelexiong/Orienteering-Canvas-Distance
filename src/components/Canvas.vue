@@ -36,7 +36,6 @@ export default defineComponent({
     Loading
   },
   props: {
-    size: { type: String, required: true },
     segments: { type: Array, required: true },
     currentSegment: { type: Number, required: true },
     scale: { type: Number, required: true },
@@ -256,7 +255,6 @@ export default defineComponent({
 <style scoped lang="scss">
 .canvas-card {
   margin: 0 auto;
-  max-width: 900px;
   border-radius: 16px;
   box-shadow: 0 4px 24px rgba(64, 158, 255, 0.1);
   .el-card__footer {

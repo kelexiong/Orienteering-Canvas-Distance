@@ -6,23 +6,22 @@
     </div>
     <el-container class="home-tech-container">
       <el-aside class="canvas-aside">
-        <el-card class="canvas-card animate__animated animate__fadeInLeft" shadow="hover">
-          <Canvas
-            :segments="segments"
-            :draw-mode="drawMode"
-            :size="canvasSize"
-            :width="canvasWidth"
-            :height="canvasHeight"
-            :current-segment="currentSegment"
-            :scale="scale"
-            :drawing="drawing"
-            :image-src="imageSrc"
-            :orientation="orientation"
-            :edit-mode="editMode"
-            @add-point="addPoint"
-            class="home-canvas"
-          />
-        </el-card>
+        <!-- <el-card class="canvas-card animate__animated animate__fadeInLeft" shadow="hover"> -->
+        <Canvas
+          :segments="segments"
+          :draw-mode="drawMode"
+          :width="canvasWidth"
+          :height="canvasHeight"
+          :current-segment="currentSegment"
+          :scale="scale"
+          :drawing="drawing"
+          :image-src="imageSrc"
+          :orientation="orientation"
+          :edit-mode="editMode"
+          @add-point="addPoint"
+          class="home-canvas"
+        />
+        <!-- </el-card> -->
       </el-aside>
       <el-main class="panel-main">
         <!-- PC端操作面板 -->
@@ -275,29 +274,16 @@ export default defineComponent({
     }
 
     // 自定义Hook管理画布设置
-    const canvasSize = ref<'A4' | 'A5'>('A4')
     const orientation = ref<'landscape' | 'portrait'>('landscape')
     const scale = ref(1)
 
     const canvasWidth = computed(() => {
-      if (canvasSize.value === 'A4') {
-        return orientation.value === 'landscape' ? 842 : 595
-      } else {
-        return orientation.value === 'landscape' ? 595 : 420
-      }
+      return orientation.value === 'landscape' ? 842 : 595
     })
 
     const canvasHeight = computed(() => {
-      if (canvasSize.value === 'A4') {
-        return orientation.value === 'landscape' ? 595 : 842
-      } else {
-        return orientation.value === 'landscape' ? 420 : 595
-      }
+      return orientation.value === 'landscape' ? 595 : 842
     })
-
-    const setCanvasSize = (size: 'A4' | 'A5') => {
-      canvasSize.value = size
-    }
 
     const toggleOrientation = () => {
       orientation.value = orientation.value === 'landscape' ? 'portrait' : 'landscape'
@@ -359,12 +345,10 @@ export default defineComponent({
       insertMode,
       editMode,
       loading,
-      canvasSize,
       drawMode,
       scale,
       drawing,
       imageSrc,
-      setCanvasSize,
       clearPoints,
       removePoint,
       addSegment,
@@ -447,23 +431,20 @@ export default defineComponent({
   display: flex;
   flex-direction: row;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
   min-height: 90vh;
-  max-width: 1400px;
-  margin: 0 auto;
+  margin: 0 0.8rem;
   border-radius: 18px;
   box-shadow: 0 8px 32px rgba(64, 158, 255, 0.18);
   background: rgba(255, 255, 255, 0.04);
   overflow: visible;
 }
 .canvas-aside {
-  flex: 2;
-  min-width: 500px;
-  max-width: 900px;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px 0 32px 32px;
+  padding: 32px;
 }
 .canvas-card {
   border-radius: 18px;
@@ -472,10 +453,10 @@ export default defineComponent({
   background: #fff;
   padding: 18px 12px;
   width: 100%;
-  max-width: 800px;
+  // max-width: 800px;
 }
 .panel-main {
-  width: 400px;
+  flex: 1;
   flex-shrink: 0;
   padding: 32px 32px 32px 0;
   display: flex;
