@@ -19,7 +19,9 @@
           :orientation="orientation"
           :edit-mode="editMode"
           @add-point="addPoint"
+          @add-marker="addMarker"
           class="home-canvas"
+          ref="canvasRef"
         />
         <!-- </el-card> -->
       </el-aside>
@@ -166,14 +168,19 @@
         />
         <!-- 点位列表 -->
         <el-card class="pointlist-card animate__animated animate__fadeInUp" shadow="hover">
-          <PointList
-            :points="segments[currentSegment]"
+          <DiaryList
+            :segment="segments[currentSegment]"
             :scale="scale"
             :segment-index="currentSegment"
+            :all-segments="segments"
+            :canvas-element="getCanvasElement()"
             @remove-point="removePoint"
             @insert-point-mode="onInsertPointMode"
             @edit-point-mode="onEditPointMode"
             @toggle-type="togglePointType"
+            @update-segment-description="updateSegmentDescription"
+            @update-point-description="updatePointDescription"
+            @remove-marker="removeMarker"
           />
         </el-card>
       </el-main>
@@ -184,64 +191,105 @@
 <script lang="ts">
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Canvas from '../components/Canvas.vue'
-import PointList from '../components/PointList.vue'
+import DiaryList from '../components/DiaryList.vue'
 import { Compass, Edit, Delete, Picture, Refresh, Connection, Menu } from '@element-plus/icons-vue'
+import type { Segment, Point, Marker } from '../types'
 
 export default defineComponent({
-  components: { Canvas, PointList, Compass, Edit, Delete, Picture, Refresh, Connection, Menu },
+  components: {
+    Canvas,
+    DiaryList,
+    Compass,
+    Edit,
+    Delete,
+    Picture,
+    Refresh,
+    Connection,
+    Menu
+  },
   setup() {
     const drawing = ref(false)
     const imageSrc = ref<string | null>(null)
     const fileInput = ref<HTMLInputElement | null>(null)
+    const canvasRef = ref<any>(null)
     const loading = ref(false) // 加载状态
     const drawMode = ref<'line' | 'curve'>('line')
     const showLandscapeTip = ref(false)
 
-    // 自定义Hook管理点位逻辑
-    const segments = ref<Array<Array<{ x: number; y: number; type?: string }>>>([[]]) // 至少有一个分段
+    // 自定义Hook管理点位逻辑 - 使用新的Segment数据结构
+    const segments = ref<Segment[]>([
+      {
+        id: '1',
+        name: '分段1',
+        points: [],
+        markers: [],
+        description: '',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ])
     const currentSegment = ref(0)
     const insertMode = ref<{ segIdx: number; ptIdx: number } | null>(null)
     const editMode = ref<{ segIdx: number; ptIdx: number } | null>(null)
 
     const addPoint = (point: { x: number; y: number }) => {
       const type = drawMode.value // 'line' 或 'curve'
+      const newPoint: Point = {
+        ...point,
+        type,
+        timestamp: new Date()
+      }
+
       if (editMode.value) {
         // 编辑模式
         const { segIdx, ptIdx } = editMode.value
-        const old = segments.value[segIdx][ptIdx]
-        segments.value[segIdx].splice(ptIdx, 1, { ...point, type: old.type })
+        const old = segments.value[segIdx].points[ptIdx]
+        segments.value[segIdx].points.splice(ptIdx, 1, { ...newPoint, type: old.type })
+        segments.value[segIdx].updatedAt = new Date()
         editMode.value = null
         drawing.value = false
       } else if (insertMode.value) {
         // 插入模式
         const { segIdx, ptIdx } = insertMode.value
-        segments.value[segIdx].splice(ptIdx, 0, { ...point, type })
+        segments.value[segIdx].points.splice(ptIdx, 0, newPoint)
+        segments.value[segIdx].updatedAt = new Date()
         insertMode.value = null
         drawing.value = false
       } else {
         // 普通追加
         if (!segments.value[currentSegment.value]) {
-          segments.value[currentSegment.value] = []
+          segments.value[currentSegment.value] = {
+            id: Date.now().toString(),
+            name: `分段${currentSegment.value + 1}`,
+            points: [],
+            markers: [],
+            description: '',
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }
         }
-        if (segments.value[currentSegment.value].length === 0) {
-          segments.value[currentSegment.value].push({ ...point })
+        if (segments.value[currentSegment.value].points.length === 0) {
+          segments.value[currentSegment.value].points.push({ ...newPoint, type: undefined })
         } else {
-          segments.value[currentSegment.value].push({ ...point, type })
+          segments.value[currentSegment.value].points.push(newPoint)
         }
+        segments.value[currentSegment.value].updatedAt = new Date()
       }
     }
 
     const updatePoint = (segIdx: number, ptIdx: number, newPoint: { x: number; y: number }) => {
-      const old = segments.value[segIdx][ptIdx]
-      segments.value[segIdx].splice(ptIdx, 1, { ...newPoint, type: old.type })
+      const old = segments.value[segIdx].points[ptIdx]
+      segments.value[segIdx].points.splice(ptIdx, 1, { ...newPoint, type: old.type })
+      segments.value[segIdx].updatedAt = new Date()
       console.log('updatePoint', segments.value)
     }
 
-    const removePoint = (segIdx, ptIdx) => {
-      if (segments.value[segIdx] && segments.value[segIdx][ptIdx] !== undefined) {
-        segments.value[segIdx].splice(ptIdx, 1)
+    const removePoint = (segIdx: number, ptIdx: number) => {
+      if (segments.value[segIdx] && segments.value[segIdx].points[ptIdx] !== undefined) {
+        segments.value[segIdx].points.splice(ptIdx, 1)
+        segments.value[segIdx].updatedAt = new Date()
         // 如果分段被删空，且不是唯一分段，则自动删除该分段
-        if (segments.value[segIdx].length === 0 && segments.value.length > 1) {
+        if (segments.value[segIdx].points.length === 0 && segments.value.length > 1) {
           segments.value.splice(segIdx, 1)
           // 修正 currentSegment
           if (currentSegment.value >= segments.value.length) {
@@ -251,25 +299,85 @@ export default defineComponent({
       }
     }
 
-    const insertPoint = (segIdx, ptIdx, point) => {
+    const insertPoint = (segIdx: number, ptIdx: number, point: Point) => {
       if (segments.value[segIdx]) {
-        segments.value[segIdx].splice(ptIdx, 0, point)
+        segments.value[segIdx].points.splice(ptIdx, 0, point)
+        segments.value[segIdx].updatedAt = new Date()
       }
     }
 
     const clearPoints = () => {
-      segments.value = [[]]
+      segments.value = [
+        {
+          id: '1',
+          name: '分段1',
+          points: [],
+          markers: [],
+          description: '',
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+      ]
       currentSegment.value = 0
     }
 
     const addSegment = () => {
-      segments.value.push([])
+      const newSegment: Segment = {
+        id: Date.now().toString(),
+        name: `分段${segments.value.length + 1}`,
+        points: [],
+        markers: [],
+        description: '',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+      segments.value.push(newSegment)
       currentSegment.value = segments.value.length - 1
     }
 
-    const setCurrentSegment = idx => {
+    const setCurrentSegment = (idx: number) => {
       if (idx >= 0 && idx < segments.value.length) {
         currentSegment.value = idx
+      }
+    }
+
+    // 新增：更新分段描述
+    const updateSegmentDescription = (segIdx: number, description: string) => {
+      if (segments.value[segIdx]) {
+        segments.value[segIdx].description = description
+        segments.value[segIdx].updatedAt = new Date()
+      }
+    }
+
+    // 新增：更新点位描述
+    const updatePointDescription = (segIdx: number, ptIdx: number, description: string) => {
+      if (segments.value[segIdx] && segments.value[segIdx].points[ptIdx]) {
+        segments.value[segIdx].points[ptIdx].description = description
+        segments.value[segIdx].updatedAt = new Date()
+      }
+    }
+
+    // 新增：删除标记
+    const removeMarker = (segIdx: number, markerId: string) => {
+      if (segments.value[segIdx]) {
+        const markerIndex = segments.value[segIdx].markers.findIndex(m => m.id === markerId)
+        if (markerIndex !== -1) {
+          segments.value[segIdx].markers.splice(markerIndex, 1)
+          segments.value[segIdx].updatedAt = new Date()
+        }
+      }
+    }
+
+    // 新增：添加标记
+    const addMarker = (segIdx: number, marker: Omit<Marker, 'id' | 'timestamp'>) => {
+      if (segments.value[segIdx]) {
+        const newMarker: Marker = {
+          ...marker,
+          id: Date.now().toString(),
+          timestamp: new Date()
+        }
+        segments.value[segIdx].markers.push(newMarker)
+        segments.value[segIdx].updatedAt = new Date()
       }
     }
 
@@ -300,9 +408,8 @@ export default defineComponent({
       if (window.innerWidth < window.innerHeight) {
         showLandscapeTip.value = true
         // 尝试自动横屏
-        if (screen.orientation && screen.orientation.lock) {
-          // @ts-ignore
-          screen.orientation.lock('landscape').catch(() => {})
+        if (screen.orientation && (screen.orientation as any).lock) {
+          ;(screen.orientation as any).lock('landscape').catch(() => {})
         }
       } else {
         showLandscapeTip.value = false
@@ -332,10 +439,16 @@ export default defineComponent({
 
     // 新增：切换type
     const togglePointType = (segIdx: number, ptIdx: number) => {
-      const pt = segments.value[segIdx][ptIdx]
+      const pt = segments.value[segIdx].points[ptIdx]
       if (!pt) return
       const newType = !pt.type || pt.type === 'line' ? 'curve' : 'line'
-      segments.value[segIdx].splice(ptIdx, 1, { ...pt, type: newType })
+      segments.value[segIdx].points.splice(ptIdx, 1, { ...pt, type: newType })
+    }
+
+    // 获取canvas元素
+    const getCanvasElement = () => {
+      // 在选项式API中，通过$refs访问组件实例
+      return canvasRef.value?.$refs?.canvas || canvasRef.value?.canvas || null
     }
 
     // 在返回值中添加_segments用于模板绑定
@@ -384,12 +497,18 @@ export default defineComponent({
       canvasWidth,
       canvasHeight,
       Canvas,
-      PointList,
+      DiaryList,
       setCurrentSegment,
       showLandscapeTip,
       drawerVisible,
       isMobile,
-      togglePointType
+      togglePointType,
+      updateSegmentDescription,
+      updatePointDescription,
+      removeMarker,
+      addMarker,
+      canvasRef,
+      getCanvasElement
     }
   }
 })
@@ -398,13 +517,13 @@ export default defineComponent({
 <style scoped lang="scss">
 :global(body),
 :global(html) {
-  overflow: hidden;
   height: 100%;
+  margin: 0;
+  padding: 0;
 }
 .home-tech-bg {
   min-height: 100vh;
-  width: 100vw;
-  overflow: hidden;
+  width: 100%;
   background: linear-gradient(135deg, #0f2027 0%, #2c5364 100%);
   padding: 0;
 }
@@ -432,12 +551,12 @@ export default defineComponent({
   flex-direction: row;
   justify-content: center;
   align-items: flex-start;
-  min-height: 90vh;
+  min-height: calc(100vh - 120px);
   margin: 0 0.8rem;
   border-radius: 18px;
   box-shadow: 0 8px 32px rgba(64, 158, 255, 0.18);
   background: rgba(255, 255, 255, 0.04);
-  overflow: visible;
+  padding: 20px;
 }
 .canvas-aside {
   flex: 1;
@@ -462,6 +581,8 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   gap: 24px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
 }
 .panel-card {
   border-radius: 16px;
@@ -523,17 +644,23 @@ export default defineComponent({
 @media (max-width: 900px) {
   .home-tech-container {
     flex-direction: column !important;
-    max-width: 100vw;
+    max-width: 100%;
     border-radius: 0;
     box-shadow: none;
-    min-height: 100vh;
+    min-height: auto;
+    margin: 0;
+    padding: 10px;
   }
   .canvas-aside,
   .panel-main {
-    width: 100vw !important;
+    width: 100% !important;
     min-width: 0 !important;
-    max-width: 100vw !important;
-    padding: 0 !important;
+    max-width: 100% !important;
+    padding: 10px !important;
+  }
+  .panel-main {
+    max-height: none;
+    overflow-y: visible;
   }
 }
 @media (max-width: 768px) {

@@ -7,6 +7,12 @@
         :height="height"
         class="canvas-main"
         @click="handleCanvasClick"
+        @contextmenu="handleCanvasRightClick"
+        @mousedown="onMouseDown"
+        @wheel="onWheel"
+        @touchstart="onTouchStart"
+        @touchmove="onTouchMove"
+        @touchend="onTouchEnd"
       ></canvas>
       <div v-if="isLoading" class="loading-overlay">
         <el-icon><Loading /></el-icon>
@@ -16,6 +22,58 @@
         <el-alert :title="errorMessage" type="error" show-icon :closable="false" />
       </div>
     </div>
+
+    <!-- 右键菜单 -->
+    <el-dropdown
+      ref="markerDropdown"
+      :visible="markerMenuVisible"
+      @visible-change="onMarkerMenuVisibleChange"
+      trigger="contextmenu"
+      placement="bottom-start"
+    >
+      <span></span>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item
+            v-for="markerType in markerTypes"
+            :key="markerType.type"
+            @click="selectMarkerType(markerType)"
+          >
+            <span style="margin-right: 8px">{{ markerType.icon }}</span>
+            {{ markerType.label }}
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
+
+    <!-- 标记内容输入对话框 -->
+    <el-dialog
+      v-model="markerDialogVisible"
+      title="添加标记"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="markerForm" label-width="80px">
+        <el-form-item label="标记类型">
+          <el-tag :type="getMarkerTypeColor(markerForm.type)" size="large">
+            {{ getMarkerTypeText(markerForm.type) }}
+          </el-tag>
+        </el-form-item>
+        <el-form-item label="标记内容">
+          <el-input
+            v-model="markerForm.content"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入标记内容..."
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="markerDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmAddMarker">确定</el-button>
+      </template>
+    </el-dialog>
+
     <template #footer>
       <el-alert
         title="提示：可拖动画布、滚轮缩放、点击添加点，支持移动端手势操作"
@@ -28,7 +86,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, watch, onMounted, nextTick } from 'vue'
+import { defineComponent, ref, watch, onMounted, nextTick, onUnmounted } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 export default defineComponent({
   name: 'Canvas',
@@ -46,7 +104,7 @@ export default defineComponent({
     width: { type: Number, required: true },
     height: { type: Number, required: true }
   },
-  emits: ['add-point'],
+  emits: ['add-point', 'add-marker'],
   setup(props, { emit }) {
     const canvas = ref<HTMLCanvasElement | null>(null)
     const isLoading = ref(false)
@@ -57,6 +115,24 @@ export default defineComponent({
     let lastPos = { x: 0, y: 0 }
     let justDragged = false
     let dragTimeout: number | null = null
+    let currentMarkerPosition = { x: 0, y: 0 }
+
+    const markerDropdown = ref(null)
+    const markerMenuVisible = ref(false)
+    const markerDialogVisible = ref(false)
+    const markerForm = ref({ type: '', content: '' })
+    const markerTypes = [
+      { type: 'note', label: '备注', icon: '📝' },
+      { type: 'photo', label: '照片', icon: '📷' },
+      { type: 'warning', label: '警告', icon: '⚠️' },
+      { type: 'checkpoint', label: '检查点', icon: '✓' },
+      { type: 'milestone', label: '里程碑', icon: '⭐' }
+    ]
+
+    // 移动端触摸事件
+    let touchStartTime = 0
+    let touchTimer: number | null = null
+    let isLongPress = false
 
     function handleCanvasClick(e: MouseEvent) {
       if (!props.drawing) return
@@ -69,6 +145,67 @@ export default defineComponent({
       const realX = (x - offset.value.x) / viewScale.value
       const realY = (y - offset.value.y) / viewScale.value
       emit('add-point', { x: realX, y: realY })
+    }
+
+    function handleCanvasRightClick(e: MouseEvent) {
+      e.preventDefault()
+      const rect = canvas.value!.getBoundingClientRect()
+      const scaleX = canvas.value!.width / canvas.value!.clientWidth
+      const scaleY = canvas.value!.height / canvas.value!.clientHeight
+      const x = (e.clientX - rect.left) * scaleX
+      const y = (e.clientY - rect.top) * scaleY
+      const realX = (x - offset.value.x) / viewScale.value
+      const realY = (y - offset.value.y) / viewScale.value
+
+      // 保存当前位置并显示标记菜单
+      currentMarkerPosition = { x: realX, y: realY }
+      showMarkerMenu(e.clientX, e.clientY)
+    }
+
+    function showMarkerMenu(x: number, y: number) {
+      markerForm.value.type = ''
+      markerForm.value.content = ''
+      markerMenuVisible.value = true
+    }
+
+    function selectMarkerType(markerType: { type: string; label: string; icon: string }) {
+      markerForm.value.type = markerType.type
+      markerMenuVisible.value = false
+      markerDialogVisible.value = true
+    }
+
+    function confirmAddMarker() {
+      if (markerForm.value.type && markerForm.value.content) {
+        emit('add-marker', {
+          x: currentMarkerPosition.x,
+          y: currentMarkerPosition.y,
+          type: markerForm.value.type,
+          content: markerForm.value.content
+        })
+        markerDialogVisible.value = false
+      }
+    }
+
+    function getMarkerTypeColor(type: string) {
+      const colors = {
+        note: 'info',
+        photo: 'success',
+        warning: 'danger',
+        checkpoint: 'warning',
+        milestone: 'primary'
+      }
+      return colors[type as keyof typeof colors] || 'info'
+    }
+
+    function getMarkerTypeText(type: string) {
+      const texts = {
+        note: '备注',
+        photo: '照片',
+        warning: '警告',
+        checkpoint: '检查点',
+        milestone: '里程碑'
+      }
+      return texts[type as keyof typeof texts] || '标记'
     }
 
     function draw() {
@@ -106,45 +243,55 @@ export default defineComponent({
     }
 
     function drawPointsAndLines(ctx: CanvasRenderingContext2D) {
-      ;(props.segments as Array<{ x: number; y: number; type?: 'line' | 'curve' }[]>).forEach(
-        segment => {
-          const seg = segment as Array<{ x: number; y: number; type?: 'line' | 'curve' }>
-          let i = 1
-          while (i < seg.length) {
-            // 检查连续curve段
-            if (seg[i].type === 'curve') {
-              let j = i
-              while (j < seg.length && seg[j].type === 'curve') j++
-              // 取前一个点和连续的curve点
-              const curvePoints = [seg[i - 1], ...seg.slice(i, j)]
-              if (curvePoints.length >= 3) {
-                drawCatmullRom(ctx, curvePoints)
-              } else if (curvePoints.length === 2) {
-                // 只有两个点时，降级为直线
-                ctx.beginPath()
-                ctx.moveTo(curvePoints[0].x, curvePoints[0].y)
-                ctx.lineTo(curvePoints[1].x, curvePoints[1].y)
-                ctx.stroke()
-              }
-              i = j
-            } else {
-              // 直线段
+      ;(
+        props.segments as Array<{
+          points: Array<{ x: number; y: number; type?: 'line' | 'curve' }>
+          markers: Array<{ x: number; y: number; type: string; content: string }>
+        }>
+      ).forEach(segment => {
+        const seg = segment.points as Array<{ x: number; y: number; type?: 'line' | 'curve' }>
+        let i = 1
+        while (i < seg.length) {
+          // 检查连续curve段
+          if (seg[i].type === 'curve') {
+            let j = i
+            while (j < seg.length && seg[j].type === 'curve') j++
+            // 取前一个点和连续的curve点
+            const curvePoints = [seg[i - 1], ...seg.slice(i, j)]
+            if (curvePoints.length >= 3) {
+              drawCatmullRom(ctx, curvePoints)
+            } else if (curvePoints.length === 2) {
+              // 只有两个点时，降级为直线
               ctx.beginPath()
-              ctx.moveTo(seg[i - 1].x, seg[i - 1].y)
-              ctx.lineTo(seg[i].x, seg[i].y)
+              ctx.moveTo(curvePoints[0].x, curvePoints[0].y)
+              ctx.lineTo(curvePoints[1].x, curvePoints[1].y)
               ctx.stroke()
-              i++
             }
-          }
-          // 画点
-          seg.forEach(p => {
+            i = j
+          } else {
+            // 直线段
             ctx.beginPath()
-            ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI)
-            ctx.fillStyle = 'red'
-            ctx.fill()
+            ctx.moveTo(seg[i - 1].x, seg[i - 1].y)
+            ctx.lineTo(seg[i].x, seg[i].y)
+            ctx.stroke()
+            i++
+          }
+        }
+        // 画点
+        seg.forEach(p => {
+          ctx.beginPath()
+          ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI)
+          ctx.fillStyle = 'red'
+          ctx.fill()
+        })
+
+        // 画标记点
+        if (segment.markers) {
+          segment.markers.forEach(marker => {
+            drawMarker(ctx, marker)
           })
         }
-      )
+      })
     }
 
     // Catmull-Rom样条转三次贝塞尔
@@ -165,38 +312,76 @@ export default defineComponent({
       ctx.stroke()
     }
 
+    // 绘制标记点
+    function drawMarker(
+      ctx: CanvasRenderingContext2D,
+      marker: { x: number; y: number; type: string; content: string }
+    ) {
+      const colors = {
+        note: '#409eff',
+        photo: '#67c23a',
+        warning: '#f56c6c',
+        checkpoint: '#e6a23c',
+        milestone: '#909399'
+      }
+      const color = colors[marker.type as keyof typeof colors] || '#409eff'
+
+      ctx.beginPath()
+      ctx.arc(marker.x, marker.y, 8, 0, 2 * Math.PI)
+      ctx.fillStyle = color
+      ctx.fill()
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      // 绘制标记图标
+      ctx.fillStyle = '#fff'
+      ctx.font = '12px Arial'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+
+      const icons = {
+        note: '📝',
+        photo: '📷',
+        warning: '⚠️',
+        checkpoint: '✓',
+        milestone: '⭐'
+      }
+      const icon = icons[marker.type as keyof typeof icons] || '📍'
+      ctx.fillText(icon, marker.x, marker.y)
+    }
+
     function drawAll() {
       requestAnimationFrame(draw)
     }
 
     // 拖拽与缩放
     function onMouseDown(e: MouseEvent) {
+      console.log('Mouse down:', e.clientX, e.clientY)
       dragging = true
       lastPos = { x: e.clientX, y: e.clientY }
     }
-    // // Catmull-Rom样条/二次贝塞尔
-    // const p0 = seg[i - 2] || seg[i - 1]
-    // const p1 = seg[i - 1]
-    // const p2 = seg[i]
-    // // 控制点为p1和p2中点
-    // const cpx = (p1.x + p2.x) / 2
-    // const cpy = (p1.y + p2.y) / 2
-    // ctx.quadraticCurveTo(cpx, cpy, p2.x, p2.y)
+
     function onMouseMove(e: MouseEvent) {
       if (!dragging) return
+      console.log('Mouse move:', e.clientX, e.clientY, 'dragging:', dragging)
       justDragged = true
       offset.value.x += e.clientX - lastPos.x
       offset.value.y += e.clientY - lastPos.y
       lastPos = { x: e.clientX, y: e.clientY }
     }
-    function onMouseUp() {
+
+    function onMouseUp(e: MouseEvent) {
+      console.log('Mouse up')
       dragging = false
       if (dragTimeout) clearTimeout(dragTimeout)
       dragTimeout = window.setTimeout(() => {
         justDragged = false
       }, 100)
     }
+
     function onWheel(e: WheelEvent) {
+      e.preventDefault()
       const scaleDelta = e.deltaY < 0 ? 1.1 : 0.9
       const rect = canvas.value!.getBoundingClientRect()
       const mouseX = e.clientX - rect.left
@@ -208,7 +393,95 @@ export default defineComponent({
       offset.value.y = mouseY - y * viewScale.value
       if (dragTimeout) clearTimeout(dragTimeout)
     }
-    // 移动端略
+
+    // 移动端触摸事件
+    function onTouchStart(e: TouchEvent) {
+      e.preventDefault()
+      touchStartTime = Date.now()
+      isLongPress = false
+
+      if (e.touches.length === 1) {
+        // 单指触摸
+        if (props.drawing) {
+          // 长按检测
+          touchTimer = window.setTimeout(() => {
+            isLongPress = true
+            const touch = e.touches[0]
+            const rect = canvas.value!.getBoundingClientRect()
+            const scaleX = canvas.value!.width / canvas.value!.clientWidth
+            const scaleY = canvas.value!.height / canvas.value!.clientHeight
+            const x = (touch.clientX - rect.left) * scaleX
+            const y = (touch.clientY - rect.top) * scaleY
+            const realX = (x - offset.value.x) / viewScale.value
+            const realY = (y - offset.value.y) / viewScale.value
+
+            currentMarkerPosition = { x: realX, y: realY }
+            showMarkerMenu(touch.clientX, touch.clientY)
+          }, 500) // 500ms长按
+        }
+
+        // 拖拽检测
+        dragging = true
+        const touch = e.touches[0]
+        lastPos = { x: touch.clientX, y: touch.clientY }
+      }
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      e.preventDefault()
+      if (!dragging || e.touches.length !== 1) return
+
+      const touch = e.touches[0]
+      const moveDistance = Math.sqrt(
+        Math.pow(touch.clientX - lastPos.x, 2) + Math.pow(touch.clientY - lastPos.y, 2)
+      )
+
+      // 如果移动距离超过阈值，取消长按
+      if (moveDistance > 10 && touchTimer) {
+        clearTimeout(touchTimer)
+        touchTimer = null
+        isLongPress = false
+      }
+
+      justDragged = true
+      offset.value.x += touch.clientX - lastPos.x
+      offset.value.y += touch.clientY - lastPos.y
+      lastPos = { x: touch.clientX, y: touch.clientY }
+    }
+
+    function onTouchEnd(e: TouchEvent) {
+      e.preventDefault()
+
+      // 清理长按定时器
+      if (touchTimer) {
+        clearTimeout(touchTimer)
+        touchTimer = null
+      }
+
+      // 如果不是长按且没有拖拽，则添加点位
+      if (!isLongPress && !justDragged && props.drawing && e.changedTouches.length === 1) {
+        const touch = e.changedTouches[0]
+        const rect = canvas.value!.getBoundingClientRect()
+        const scaleX = canvas.value!.width / canvas.value!.clientWidth
+        const scaleY = canvas.value!.height / canvas.value!.clientHeight
+        const x = (touch.clientX - rect.left) * scaleX
+        const y = (touch.clientY - rect.top) * scaleY
+        const realX = (x - offset.value.x) / viewScale.value
+        const realY = (y - offset.value.y) / viewScale.value
+        emit('add-point', { x: realX, y: realY })
+      }
+
+      dragging = false
+      isLongPress = false
+      if (dragTimeout) clearTimeout(dragTimeout)
+      dragTimeout = window.setTimeout(() => {
+        justDragged = false
+      }, 100)
+    }
+
+    function onMarkerMenuVisibleChange(visible: boolean) {
+      markerMenuVisible.value = visible
+    }
 
     watch(
       () => props.width,
@@ -236,6 +509,16 @@ export default defineComponent({
 
     onMounted(() => {
       drawAll()
+
+      // 添加全局鼠标事件监听器，确保拖拽功能正常工作
+      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mouseup', onMouseUp)
+    })
+
+    onUnmounted(() => {
+      // 清理全局事件监听器
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
     })
 
     return {
@@ -243,10 +526,25 @@ export default defineComponent({
       isLoading,
       errorMessage,
       handleCanvasClick,
+      handleCanvasRightClick,
       onMouseDown,
       onMouseMove,
       onMouseUp,
-      onWheel
+      onWheel,
+      onTouchStart,
+      onTouchMove,
+      onTouchEnd,
+      markerDropdown,
+      markerMenuVisible,
+      markerDialogVisible,
+      markerForm,
+      markerTypes,
+      showMarkerMenu,
+      selectMarkerType,
+      confirmAddMarker,
+      onMarkerMenuVisibleChange,
+      getMarkerTypeColor,
+      getMarkerTypeText
     }
   }
 })
