@@ -322,6 +322,12 @@ export default defineComponent({
     }
 
     const addSegment = () => {
+      // 缓存当前画布截图到当前分段
+      const canvasEl = getCanvasElement()
+      if (canvasEl && segments.value[currentSegment.value]) {
+        segments.value[currentSegment.value].image = canvasEl.toDataURL('image/png')
+      }
+      // 新增分段
       const newSegment: Segment = {
         id: Date.now().toString(),
         name: `分段${segments.value.length + 1}`,
@@ -329,13 +335,19 @@ export default defineComponent({
         markers: [],
         description: '',
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        image: '' // 新分段初始无截图
       }
       segments.value.push(newSegment)
       currentSegment.value = segments.value.length - 1
     }
 
     const setCurrentSegment = (idx: number) => {
+      // 切换前，缓存当前分段的 image
+      const canvasEl = getCanvasElement()
+      if (canvasEl && segments.value[currentSegment.value]) {
+        segments.value[currentSegment.value].image = canvasEl.toDataURL('image/png')
+      }
       if (idx >= 0 && idx < segments.value.length) {
         currentSegment.value = idx
       }
@@ -451,6 +463,17 @@ export default defineComponent({
       return canvasRef.value?.$refs?.canvas || canvasRef.value?.canvas || null
     }
 
+    // 补全所有分段的image，确保每个分段都有截图
+    const fillSegmentImages = () => {
+      const canvasEl = getCanvasElement()
+      if (!canvasEl) return
+      segments.value.forEach((seg, idx) => {
+        if (!seg.image && seg.points.length > 0) {
+          seg.image = canvasEl.toDataURL('image/png')
+        }
+      })
+    }
+
     // 在返回值中添加_segments用于模板绑定
     return {
       segments,
@@ -508,7 +531,8 @@ export default defineComponent({
       removeMarker,
       addMarker,
       canvasRef,
-      getCanvasElement
+      getCanvasElement,
+      fillSegmentImages
     }
   }
 })
@@ -581,7 +605,7 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   gap: 24px;
-  max-height: calc(100vh - 200px);
+  // max-height: calc(100vh - 200px);
   overflow-y: auto;
 }
 .panel-card {

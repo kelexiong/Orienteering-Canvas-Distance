@@ -38,6 +38,7 @@ export interface Segment {
   updatedAt: Date
   distance?: number
   duration?: number
+  image?: string // 新增：分段截图
 }
 
 // 项目配置类型

@@ -88,6 +88,21 @@
 <script lang="ts">
 import { defineComponent, ref, watch, onMounted, nextTick, onUnmounted } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
+
+// 分段颜色数组，放在setup外部
+const segmentColors = [
+  '#409EFF', // 蓝
+  '#67C23A', // 绿
+  '#E6A23C', // 橙
+  '#F56C6C', // 红
+  '#909399', // 灰
+  '#1E90FF', // 深蓝
+  '#9A60B4', // 紫
+  '#F78989', // 粉
+  '#13C2C2', // 青
+  '#FFB800' // 黄
+]
+
 export default defineComponent({
   name: 'Canvas',
   components: {
@@ -248,7 +263,10 @@ export default defineComponent({
           points: Array<{ x: number; y: number; type?: 'line' | 'curve' }>
           markers: Array<{ x: number; y: number; type: string; content: string }>
         }>
-      ).forEach(segment => {
+      ).forEach((segment, segIdx) => {
+        ctx.save()
+        ctx.strokeStyle = segmentColors[segIdx % segmentColors.length]
+        ctx.lineWidth = 2 / viewScale.value // 线宽固定为2像素
         const seg = segment.points as Array<{ x: number; y: number; type?: 'line' | 'curve' }>
         let i = 1
         while (i < seg.length) {
@@ -279,10 +297,19 @@ export default defineComponent({
         }
         // 画点
         seg.forEach(p => {
+          ctx.save()
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
           ctx.beginPath()
-          ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI)
+          ctx.arc(
+            p.x * viewScale.value + offset.value.x,
+            p.y * viewScale.value + offset.value.y,
+            5,
+            0,
+            2 * Math.PI
+          )
           ctx.fillStyle = 'red'
           ctx.fill()
+          ctx.restore()
         })
 
         // 画标记点
@@ -291,11 +318,14 @@ export default defineComponent({
             drawMarker(ctx, marker)
           })
         }
+        ctx.restore()
       })
     }
 
     // Catmull-Rom样条转三次贝塞尔
     function drawCatmullRom(ctx, points) {
+      ctx.save()
+      ctx.lineWidth = 2 / viewScale.value // 线宽固定为2像素
       ctx.beginPath()
       ctx.moveTo(points[0].x, points[0].y)
       for (let i = 0; i < points.length - 1; i++) {
@@ -310,6 +340,7 @@ export default defineComponent({
         ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
       }
       ctx.stroke()
+      ctx.restore()
     }
 
     // 绘制标记点
@@ -326,8 +357,16 @@ export default defineComponent({
       }
       const color = colors[marker.type as keyof typeof colors] || '#409eff'
 
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.beginPath()
-      ctx.arc(marker.x, marker.y, 8, 0, 2 * Math.PI)
+      ctx.arc(
+        marker.x * viewScale.value + offset.value.x,
+        marker.y * viewScale.value + offset.value.y,
+        8,
+        0,
+        2 * Math.PI
+      )
       ctx.fillStyle = color
       ctx.fill()
       ctx.strokeStyle = '#fff'
@@ -339,7 +378,6 @@ export default defineComponent({
       ctx.font = '12px Arial'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-
       const icons = {
         note: '📝',
         photo: '📷',
@@ -348,7 +386,12 @@ export default defineComponent({
         milestone: '⭐'
       }
       const icon = icons[marker.type as keyof typeof icons] || '📍'
-      ctx.fillText(icon, marker.x, marker.y)
+      ctx.fillText(
+        icon,
+        marker.x * viewScale.value + offset.value.x,
+        marker.y * viewScale.value + offset.value.y
+      )
+      ctx.restore()
     }
 
     function drawAll() {
@@ -369,6 +412,7 @@ export default defineComponent({
       offset.value.x += e.clientX - lastPos.x
       offset.value.y += e.clientY - lastPos.y
       lastPos = { x: e.clientX, y: e.clientY }
+      drawAll() // 拖动时立即重绘
     }
 
     function onMouseUp(e: MouseEvent) {
@@ -447,6 +491,7 @@ export default defineComponent({
       offset.value.x += touch.clientX - lastPos.x
       offset.value.y += touch.clientY - lastPos.y
       lastPos = { x: touch.clientX, y: touch.clientY }
+      drawAll() // 拖动时立即重绘
     }
 
     function onTouchEnd(e: TouchEvent) {

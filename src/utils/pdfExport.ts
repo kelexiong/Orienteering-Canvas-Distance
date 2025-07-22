@@ -74,40 +74,24 @@ export class PDFExporter {
       yOffset += 10
     }
 
-    // 添加轨迹图
+    // 添加轨迹图（集中插入）
     if (this.config.includeMap && canvasElement) {
       try {
-        console.log('Exporting canvas to PDF...')
-        // 直接使用canvas的toDataURL，避免html2canvas的问题
         const imgData = canvasElement.toDataURL('image/png')
-        console.log('Canvas data URL length:', imgData.length)
-
         const imgWidth = pageWidth - 2 * margin
         const imgHeight = (canvasElement.height * imgWidth) / canvasElement.width
-
-        console.log('Image dimensions:', {
-          imgWidth,
-          imgHeight,
-          canvasWidth: canvasElement.width,
-          canvasHeight: canvasElement.height
-        })
-
-        // 如果图片太高，分页处理
         if (yOffset + imgHeight > pageHeight - margin) {
           pdf.addPage()
           yOffset = margin
         }
-
         pdf.addImage(imgData, 'PNG', margin, yOffset, imgWidth, imgHeight)
         yOffset += imgHeight + 10
-        console.log('Canvas exported successfully')
       } catch (error) {
-        console.error('Export map failed:', error)
         pdf.text('Map export failed', margin, yOffset)
         yOffset += 10
       }
     } else {
-      console.log('Canvas element not available or map export disabled')
+      // 如果没有地图，则跳过添加地图的逻辑
     }
 
     // 添加分段内容
@@ -250,7 +234,7 @@ export class PDFExporter {
 
 export const defaultPDFConfig: PDFConfig = {
   orientation: 'portrait',
-  pageSize: 'a4',
+  pageSize: 'A4', // 修正为大写
   includeMap: true,
   includePoints: true,
   includeMarkers: true,
@@ -261,5 +245,6 @@ export const defaultProjectConfig: ProjectConfig = {
   title: 'Orienteering Diary',
   author: 'Orienteering App',
   date: new Date(),
-  scale: 1000
+  scale: 1000,
+  orientation: 'portrait' // 新增，补全必需字段
 }
