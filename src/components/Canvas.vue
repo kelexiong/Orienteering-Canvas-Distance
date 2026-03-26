@@ -6,6 +6,7 @@
         :width="width"
         :height="height"
         class="canvas-main"
+        :style="{ aspectRatio: `${width} / ${height}` }"
         @click="handleCanvasClick"
         @contextmenu="handleCanvasRightClick"
         @mousedown="onMouseDown"
@@ -112,6 +113,8 @@ export default defineComponent({
     segments: { type: Array, required: true },
     currentSegment: { type: Number, required: true },
     scale: { type: Number, required: true },
+    pointSizeNuber: { type: Number, required: true },
+    LineWidthNuber: { type: Number, required: true },
     drawing: { type: Boolean, required: true },
     imageSrc: { type: [String, null], required: true },
     orientation: { type: String, required: true },
@@ -125,9 +128,54 @@ export default defineComponent({
     const isLoading = ref(false)
     const errorMessage = ref('')
     const viewScale = ref(1)
-    const offset = ref({ x: 0, y: 0 })
+    const offset = ref({ x: 0, y: 0 }) // 以“canvas内部坐标(屏幕像素等价)”为单位的平移
+    const viewScaleMin = 0.2
+    const viewScaleMax = 6
+
+    function clamp(n: number, min: number, max: number) {
+      return Math.min(max, Math.max(min, n))
+    }
+
+    function getCanvasMetrics() {
+      const el = canvas.value
+      if (!el) return null
+      const rect = el.getBoundingClientRect()
+      const scaleX = rect.width ? el.width / rect.width : 1
+      const scaleY = rect.height ? el.height / rect.height : 1
+      return { rect, scaleX, scaleY }
+    }
+
+    // 将浏览器 clientX/clientY 转成“canvas内部像素体系下的屏幕坐标”
+    function clientToCanvasScreen(clientX: number, clientY: number) {
+      const m = getCanvasMetrics()
+      if (!m) return { x: 0, y: 0 }
+      return {
+        x: (clientX - m.rect.left) * m.scaleX,
+        y: (clientY - m.rect.top) * m.scaleY
+      }
+    }
+
+    function getImageContainRect(
+      img: HTMLImageElement,
+      targetW: number,
+      targetH: number
+    ): { dx: number; dy: number; dw: number; dh: number } {
+      const iw = img.naturalWidth || img.width
+      const ih = img.naturalHeight || img.height
+      if (!iw || !ih) return { dx: 0, dy: 0, dw: targetW, dh: targetH }
+      const s = Math.min(targetW / iw, targetH / ih)
+      const dw = iw * s
+      const dh = ih * s
+      return {
+        dx: (targetW - dw) / 2,
+        dy: (targetH - dh) / 2,
+        dw,
+        dh
+      }
+    }
+
     let dragging = false
-    let lastPos = { x: 0, y: 0 }
+    let lastPos = { x: 0, y: 0 } // 以 canvas内部“屏幕像素体系”为单位
     let justDragged = false
     let dragTimeout: number | null = null
     let currentMarkerPosition = { x: 0, y: 0 }
@@ -148,15 +196,15 @@ export default defineComponent({
     let touchStartTime = 0
     let touchTimer: number | null = null
     let isLongPress = false
+    let pinchActive = false
+    let pinchStartDistance = 0
+    let pinchStartScale = 1
+    let pinchAnchorLogical = { x: 0, y: 0 }
 
     function handleCanvasClick(e: MouseEvent) {
       if (!props.drawing) return
       if (justDragged) return
-      const rect = canvas.value!.getBoundingClientRect()
-      const scaleX = canvas.value!.width / canvas.value!.clientWidth
-      const scaleY = canvas.value!.height / canvas.value!.clientHeight
-      const x = (e.clientX - rect.left) * scaleX
-      const y = (e.clientY - rect.top) * scaleY
+      const { x, y } = clientToCanvasScreen(e.clientX, e.clientY)
       const realX = (x - offset.value.x) / viewScale.value
       const realY = (y - offset.value.y) / viewScale.value
       emit('add-point', { x: realX, y: realY })
@@ -164,11 +212,7 @@ export default defineComponent({
 
     function handleCanvasRightClick(e: MouseEvent) {
       e.preventDefault()
-      const rect = canvas.value!.getBoundingClientRect()
-      const scaleX = canvas.value!.width / canvas.value!.clientWidth
-      const scaleY = canvas.value!.height / canvas.value!.clientHeight
-      const x = (e.clientX - rect.left) * scaleX
-      const y = (e.clientY - rect.top) * scaleY
+      const { x, y } = clientToCanvasScreen(e.clientX, e.clientY)
       const realX = (x - offset.value.x) / viewScale.value
       const realY = (y - offset.value.y) / viewScale.value
 
@@ -226,20 +270,21 @@ export default defineComponent({
     function draw() {
       const ctx = canvas.value?.getContext('2d')
       if (!ctx) return
+
+      // 每次重绘时先清空，避免 setTransform 后 clearRect 坐标体系混乱
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, props.width, props.height)
+
+      // 统一由 viewScale/offset 控制视口变换
       ctx.setTransform(viewScale.value, 0, 0, viewScale.value, offset.value.x, offset.value.y)
-      ctx.clearRect(
-        -offset.value.x / viewScale.value,
-        -offset.value.y / viewScale.value,
-        props.width / viewScale.value,
-        props.height / viewScale.value
-      )
       if (props.imageSrc) {
         const img = new window.Image()
         img.src = props.imageSrc as string
         isLoading.value = true
         errorMessage.value = ''
         img.onload = () => {
-          ctx.drawImage(img, 0, 0, props.width, props.height)
+          const { dx, dy, dw, dh } = getImageContainRect(img, props.width, props.height)
+          ctx.drawImage(img, dx, dy, dw, dh)
           drawPointsAndLines(ctx)
           isLoading.value = false
         }
@@ -248,7 +293,8 @@ export default defineComponent({
           isLoading.value = false
         }
         if (img.complete) {
-          ctx.drawImage(img, 0, 0, props.width, props.height)
+          const { dx, dy, dw, dh } = getImageContainRect(img, props.width, props.height)
+          ctx.drawImage(img, dx, dy, dw, dh)
           drawPointsAndLines(ctx)
           isLoading.value = false
         }
@@ -266,7 +312,7 @@ export default defineComponent({
       ).forEach((segment, segIdx) => {
         ctx.save()
         ctx.strokeStyle = segmentColors[segIdx % segmentColors.length]
-        ctx.lineWidth = 2 / viewScale.value // 线宽固定为2像素
+        ctx.lineWidth = props.LineWidthNuber / viewScale.value // 线宽固定为2像素
         const seg = segment.points as Array<{ x: number; y: number; type?: 'line' | 'curve' }>
         let i = 1
         while (i < seg.length) {
@@ -303,7 +349,7 @@ export default defineComponent({
           ctx.arc(
             p.x * viewScale.value + offset.value.x,
             p.y * viewScale.value + offset.value.y,
-            5,
+            props.pointSizeNuber,
             0,
             2 * Math.PI
           )
@@ -325,7 +371,7 @@ export default defineComponent({
     // Catmull-Rom样条转三次贝塞尔
     function drawCatmullRom(ctx, points) {
       ctx.save()
-      ctx.lineWidth = 2 / viewScale.value // 线宽固定为2像素
+      ctx.lineWidth = props.LineWidthNuber / viewScale.value // 线宽固定为2像素
       ctx.beginPath()
       ctx.moveTo(points[0].x, points[0].y)
       for (let i = 0; i < points.length - 1; i++) {
@@ -363,14 +409,14 @@ export default defineComponent({
       ctx.arc(
         marker.x * viewScale.value + offset.value.x,
         marker.y * viewScale.value + offset.value.y,
-        8,
+        props.pointSizeNuber,
         0,
         2 * Math.PI
       )
       ctx.fillStyle = color
       ctx.fill()
       ctx.strokeStyle = '#fff'
-      ctx.lineWidth = 2
+      ctx.lineWidth = props.LineWidthNuber
       ctx.stroke()
 
       // 绘制标记图标
@@ -402,16 +448,19 @@ export default defineComponent({
     function onMouseDown(e: MouseEvent) {
       console.log('Mouse down:', e.clientX, e.clientY)
       dragging = true
-      lastPos = { x: e.clientX, y: e.clientY }
+      justDragged = false
+      pinchActive = false
+      lastPos = clientToCanvasScreen(e.clientX, e.clientY)
     }
 
     function onMouseMove(e: MouseEvent) {
       if (!dragging) return
       console.log('Mouse move:', e.clientX, e.clientY, 'dragging:', dragging)
       justDragged = true
-      offset.value.x += e.clientX - lastPos.x
-      offset.value.y += e.clientY - lastPos.y
-      lastPos = { x: e.clientX, y: e.clientY }
+      const p = clientToCanvasScreen(e.clientX, e.clientY)
+      offset.value.x += p.x - lastPos.x
+      offset.value.y += p.y - lastPos.y
+      lastPos = p
       drawAll() // 拖动时立即重绘
     }
 
@@ -426,16 +475,20 @@ export default defineComponent({
 
     function onWheel(e: WheelEvent) {
       e.preventDefault()
+
       const scaleDelta = e.deltaY < 0 ? 1.1 : 0.9
-      const rect = canvas.value!.getBoundingClientRect()
-      const mouseX = e.clientX - rect.left
-      const mouseY = e.clientY - rect.top
-      const x = (mouseX - offset.value.x) / viewScale.value
-      const y = (mouseY - offset.value.y) / viewScale.value
-      viewScale.value *= scaleDelta
-      offset.value.x = mouseX - x * viewScale.value
-      offset.value.y = mouseY - y * viewScale.value
+      const { x: cursorScreenX, y: cursorScreenY } = clientToCanvasScreen(e.clientX, e.clientY)
+
+      // 以光标位置为缩放中心：让缩放前后该点的“逻辑坐标”保持不变
+      const logicalX = (cursorScreenX - offset.value.x) / viewScale.value
+      const logicalY = (cursorScreenY - offset.value.y) / viewScale.value
+
+      const nextScale = clamp(viewScale.value * scaleDelta, viewScaleMin, viewScaleMax)
+      offset.value.x = cursorScreenX - logicalX * nextScale
+      offset.value.y = cursorScreenY - logicalY * nextScale
+      viewScale.value = nextScale
       if (dragTimeout) clearTimeout(dragTimeout)
+      drawAll()
     }
 
     // 移动端触摸事件
@@ -443,7 +496,7 @@ export default defineComponent({
       e.preventDefault()
       touchStartTime = Date.now()
       isLongPress = false
-
+      pinchActive = false
       if (e.touches.length === 1) {
         // 单指触摸
         if (props.drawing) {
@@ -451,11 +504,7 @@ export default defineComponent({
           touchTimer = window.setTimeout(() => {
             isLongPress = true
             const touch = e.touches[0]
-            const rect = canvas.value!.getBoundingClientRect()
-            const scaleX = canvas.value!.width / canvas.value!.clientWidth
-            const scaleY = canvas.value!.height / canvas.value!.clientHeight
-            const x = (touch.clientX - rect.left) * scaleX
-            const y = (touch.clientY - rect.top) * scaleY
+            const { x, y } = clientToCanvasScreen(touch.clientX, touch.clientY)
             const realX = (x - offset.value.x) / viewScale.value
             const realY = (y - offset.value.y) / viewScale.value
 
@@ -467,18 +516,65 @@ export default defineComponent({
         // 拖拽检测
         dragging = true
         const touch = e.touches[0]
-        lastPos = { x: touch.clientX, y: touch.clientY }
+        justDragged = false
+        lastPos = clientToCanvasScreen(touch.clientX, touch.clientY)
+      }
+      if (e.touches.length === 2) {
+        // 双指捏合缩放
+        dragging = false
+        justDragged = true // 避免松手时误触发“添加点”
+        isLongPress = false
+        if (touchTimer) clearTimeout(touchTimer)
+        touchTimer = null
+
+        const t1 = e.touches[0]
+        const t2 = e.touches[1]
+        const p1 = clientToCanvasScreen(t1.clientX, t1.clientY)
+        const p2 = clientToCanvasScreen(t2.clientX, t2.clientY)
+        pinchStartDistance = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+        pinchStartScale = viewScale.value
+
+        const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+        pinchAnchorLogical = {
+          x: (center.x - offset.value.x) / viewScale.value,
+          y: (center.y - offset.value.y) / viewScale.value
+        }
+        pinchActive = true
       }
     }
 
     function onTouchMove(e: TouchEvent) {
       e.preventDefault()
+      if (e.touches.length === 2) {
+        if (!pinchActive) return
+        const t1 = e.touches[0]
+        const t2 = e.touches[1]
+        const p1 = clientToCanvasScreen(t1.clientX, t1.clientY)
+        const p2 = clientToCanvasScreen(t2.clientX, t2.clientY)
+
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+        if (!pinchStartDistance) return
+
+        const nextScale = clamp(
+          pinchStartScale * (dist / pinchStartDistance),
+          viewScaleMin,
+          viewScaleMax
+        )
+
+        const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+        offset.value.x = center.x - pinchAnchorLogical.x * nextScale
+        offset.value.y = center.y - pinchAnchorLogical.y * nextScale
+        viewScale.value = nextScale
+
+        drawAll()
+        return
+      }
+
       if (!dragging || e.touches.length !== 1) return
 
       const touch = e.touches[0]
-      const moveDistance = Math.sqrt(
-        Math.pow(touch.clientX - lastPos.x, 2) + Math.pow(touch.clientY - lastPos.y, 2)
-      )
+      const p = clientToCanvasScreen(touch.clientX, touch.clientY)
+      const moveDistance = Math.hypot(p.x - lastPos.x, p.y - lastPos.y)
 
       // 如果移动距离超过阈值，取消长按
       if (moveDistance > 10 && touchTimer) {
@@ -488,14 +584,16 @@ export default defineComponent({
       }
 
       justDragged = true
-      offset.value.x += touch.clientX - lastPos.x
-      offset.value.y += touch.clientY - lastPos.y
-      lastPos = { x: touch.clientX, y: touch.clientY }
+      offset.value.x += p.x - lastPos.x
+      offset.value.y += p.y - lastPos.y
+      lastPos = p
       drawAll() // 拖动时立即重绘
     }
 
     function onTouchEnd(e: TouchEvent) {
       e.preventDefault()
+      const wasPinching = pinchActive
+      pinchActive = false
 
       // 清理长按定时器
       if (touchTimer) {
@@ -504,13 +602,15 @@ export default defineComponent({
       }
 
       // 如果不是长按且没有拖拽，则添加点位
-      if (!isLongPress && !justDragged && props.drawing && e.changedTouches.length === 1) {
+      if (
+        !wasPinching &&
+        !isLongPress &&
+        !justDragged &&
+        props.drawing &&
+        e.changedTouches.length === 1
+      ) {
         const touch = e.changedTouches[0]
-        const rect = canvas.value!.getBoundingClientRect()
-        const scaleX = canvas.value!.width / canvas.value!.clientWidth
-        const scaleY = canvas.value!.height / canvas.value!.clientHeight
-        const x = (touch.clientX - rect.left) * scaleX
-        const y = (touch.clientY - rect.top) * scaleY
+        const { x, y } = clientToCanvasScreen(touch.clientX, touch.clientY)
         const realX = (x - offset.value.x) / viewScale.value
         const realY = (y - offset.value.y) / viewScale.value
         emit('add-point', { x: realX, y: realY })
@@ -625,6 +725,7 @@ export default defineComponent({
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(64, 158, 255, 0.08);
   width: 100%;
+  height: auto;
   max-width: 100%;
   max-height: 60vw;
   margin: 0 auto;

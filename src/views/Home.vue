@@ -14,6 +14,8 @@
           :height="canvasHeight"
           :current-segment="currentSegment"
           :scale="scale"
+          :pointSizeNuber="pointSizeNuber"
+          :LineWidthNuber="LineWidthNuber"
           :drawing="drawing"
           :image-src="imageSrc"
           :orientation="orientation"
@@ -87,6 +89,12 @@
             <el-form-item label="比例尺">
               <el-input-number v-model="scale" :min="0.01" :step="0.01" />
             </el-form-item>
+            <el-form-item label="画点大小">
+              <el-input-number v-model="pointSizeNuber" :min="2" :step="1" />
+            </el-form-item>
+            <el-form-item label="连线大小">
+              <el-input-number v-model="LineWidthNuber" :min="2" :step="1" />
+            </el-form-item>
           </el-form>
         </el-card>
         <!-- 移动端操作面板Drawer -->
@@ -152,6 +160,12 @@
             <el-form class="home-scale-input" inline>
               <el-form-item label="比例尺">
                 <el-input-number v-model="scale" :min="0.01" :step="0.01" />
+              </el-form-item>
+              <el-form-item label="画点大小">
+                <el-input-number v-model="pointSizeNuber" :min="2" :step="1" />
+              </el-form-item>
+              <el-form-item label="连线大小">
+                <el-input-number v-model="LineWidthNuber" :min="2" :step="1" />
               </el-form-item>
             </el-form>
           </el-card>
@@ -396,7 +410,8 @@ export default defineComponent({
     // 自定义Hook管理画布设置
     const orientation = ref<'landscape' | 'portrait'>('landscape')
     const scale = ref(1)
-
+    const pointSizeNuber = ref(2)
+    const LineWidthNuber = ref(2)
     const canvasWidth = computed(() => {
       return orientation.value === 'landscape' ? 842 : 595
     })
@@ -483,6 +498,8 @@ export default defineComponent({
       loading,
       drawMode,
       scale,
+      pointSizeNuber,
+      LineWidthNuber,
       drawing,
       imageSrc,
       clearPoints,
@@ -630,7 +647,7 @@ export default defineComponent({
 .home-scale-input {
   margin-top: 12px;
   .el-input-number {
-    width: 100%;
+    width: 120px;
     font-size: 16px;
   }
 }
@@ -640,6 +657,9 @@ export default defineComponent({
   background: #fff;
   margin-bottom: 18px;
   padding: 18px 12px;
+  height: 300px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .drawer-btn {
   position: fixed;
