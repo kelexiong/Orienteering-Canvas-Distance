@@ -177,7 +177,7 @@
           icon="Menu"
           circle
           size="large"
-          @click="drawerVisible = true"
+          @click="drawerVisible = !drawerVisible"
           v-if="isMobile"
         />
         <!-- 点位列表 -->
