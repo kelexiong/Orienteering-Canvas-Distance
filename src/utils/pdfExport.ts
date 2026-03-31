@@ -74,8 +74,8 @@ export class PDFExporter {
       yOffset += 10
     }
 
-    // 添加轨迹图（集中插入）
-    if (this.config.includeMap && canvasElement) {
+    // 单分段时在开头插入总览图；多分段时改为每段单独插图，避免分段图被覆盖
+    if (this.config.includeMap && canvasElement && segments.length === 1) {
       try {
         const imgData = canvasElement.toDataURL('image/png')
         const imgWidth = pageWidth - 2 * margin
@@ -121,6 +121,25 @@ export class PDFExporter {
           yOffset += 5
         })
         yOffset += 5
+      }
+
+      // 分段轨迹图（优先使用分段独立截图）
+      if (this.config.includeMap) {
+        const segImgData = segment.image || ''
+        const imgData = segImgData || canvasElement.toDataURL('image/png')
+        const imgWidth = pageWidth - 2 * margin
+        const imgHeight = (canvasElement.height * imgWidth) / canvasElement.width
+        if (yOffset + imgHeight > pageHeight - margin) {
+          pdf.addPage()
+          yOffset = margin
+        }
+        try {
+          pdf.addImage(imgData, 'PNG', margin, yOffset, imgWidth, imgHeight)
+          yOffset += imgHeight + 8
+        } catch (error) {
+          pdf.text('Segment map export failed', margin, yOffset)
+          yOffset += 8
+        }
       }
 
       // 点位信息

@@ -335,11 +335,11 @@ export default defineComponent({
       currentSegment.value = 0
     }
 
-    const addSegment = () => {
-      // 缓存当前画布截图到当前分段
-      const canvasEl = getCanvasElement()
-      if (canvasEl && segments.value[currentSegment.value]) {
-        segments.value[currentSegment.value].image = canvasEl.toDataURL('image/png')
+    const addSegment = async () => {
+      // 缓存当前分段独立截图，避免后续分段覆盖导出内容
+      if (canvasRef.value?.captureSegmentImage && segments.value[currentSegment.value]) {
+        const image = await canvasRef.value.captureSegmentImage(currentSegment.value)
+        if (image) segments.value[currentSegment.value].image = image
       }
       // 新增分段
       const newSegment: Segment = {
@@ -356,11 +356,11 @@ export default defineComponent({
       currentSegment.value = segments.value.length - 1
     }
 
-    const setCurrentSegment = (idx: number) => {
-      // 切换前，缓存当前分段的 image
-      const canvasEl = getCanvasElement()
-      if (canvasEl && segments.value[currentSegment.value]) {
-        segments.value[currentSegment.value].image = canvasEl.toDataURL('image/png')
+    const setCurrentSegment = async (idx: number) => {
+      // 切换前，缓存当前分段独立截图
+      if (canvasRef.value?.captureSegmentImage && segments.value[currentSegment.value]) {
+        const image = await canvasRef.value.captureSegmentImage(currentSegment.value)
+        if (image) segments.value[currentSegment.value].image = image
       }
       if (idx >= 0 && idx < segments.value.length) {
         currentSegment.value = idx
@@ -479,14 +479,15 @@ export default defineComponent({
     }
 
     // 补全所有分段的image，确保每个分段都有截图
-    const fillSegmentImages = () => {
-      const canvasEl = getCanvasElement()
-      if (!canvasEl) return
-      segments.value.forEach((seg, idx) => {
+    const fillSegmentImages = async () => {
+      if (!canvasRef.value?.captureSegmentImage) return
+      for (let idx = 0; idx < segments.value.length; idx++) {
+        const seg = segments.value[idx]
         if (!seg.image && seg.points.length > 0) {
-          seg.image = canvasEl.toDataURL('image/png')
+          const image = await canvasRef.value.captureSegmentImage(idx)
+          if (image) seg.image = image
         }
-      })
+      }
     }
 
     // 在返回值中添加_segments用于模板绑定

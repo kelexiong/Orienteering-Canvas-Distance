@@ -303,13 +303,16 @@ export default defineComponent({
       }
     }
 
-    function drawPointsAndLines(ctx: CanvasRenderingContext2D) {
-      ;(
-        props.segments as Array<{
-          points: Array<{ x: number; y: number; type?: 'line' | 'curve' }>
-          markers: Array<{ x: number; y: number; type: string; content: string }>
-        }>
-      ).forEach((segment, segIdx) => {
+    type DrawSegment = {
+      points: Array<{ x: number; y: number; type?: 'line' | 'curve' }>
+      markers: Array<{ x: number; y: number; type: string; content: string }>
+    }
+
+    function drawPointsAndLines(
+      ctx: CanvasRenderingContext2D,
+      segmentsToDraw: DrawSegment[] = props.segments as DrawSegment[]
+    ) {
+      segmentsToDraw.forEach((segment, segIdx) => {
         ctx.save()
         ctx.strokeStyle = segmentColors[segIdx % segmentColors.length]
         ctx.lineWidth = props.LineWidthNuber / viewScale.value // 线宽固定为2像素
@@ -366,6 +369,127 @@ export default defineComponent({
         }
         ctx.restore()
       })
+    }
+
+    // 导出用：在未缩放未平移坐标系下绘制单分段，避免分段互相覆盖
+    function drawSingleSegmentForExport(ctx: CanvasRenderingContext2D, segment: DrawSegment, segIdx: number) {
+      const seg = segment.points || []
+      if (seg.length > 0) {
+        ctx.save()
+        ctx.strokeStyle = segmentColors[segIdx % segmentColors.length]
+        ctx.lineWidth = props.LineWidthNuber
+        let i = 1
+        while (i < seg.length) {
+          if (seg[i].type === 'curve') {
+            let j = i
+            while (j < seg.length && seg[j].type === 'curve') j++
+            const curvePoints = [seg[i - 1], ...seg.slice(i, j)]
+            if (curvePoints.length >= 3) {
+              drawCatmullRomForExport(ctx, curvePoints)
+            } else if (curvePoints.length === 2) {
+              ctx.beginPath()
+              ctx.moveTo(curvePoints[0].x, curvePoints[0].y)
+              ctx.lineTo(curvePoints[1].x, curvePoints[1].y)
+              ctx.stroke()
+            }
+            i = j
+          } else {
+            ctx.beginPath()
+            ctx.moveTo(seg[i - 1].x, seg[i - 1].y)
+            ctx.lineTo(seg[i].x, seg[i].y)
+            ctx.stroke()
+            i++
+          }
+        }
+        seg.forEach(p => {
+          ctx.beginPath()
+          ctx.arc(p.x, p.y, props.pointSizeNuber, 0, 2 * Math.PI)
+          ctx.fillStyle = 'red'
+          ctx.fill()
+        })
+        ctx.restore()
+      }
+
+      if (segment.markers?.length) {
+        segment.markers.forEach(marker => {
+          drawMarkerForExport(ctx, marker)
+        })
+      }
+    }
+
+    function drawCatmullRomForExport(
+      ctx: CanvasRenderingContext2D,
+      points: Array<{ x: number; y: number }>
+    ) {
+      ctx.save()
+      ctx.lineWidth = props.LineWidthNuber
+      ctx.beginPath()
+      ctx.moveTo(points[0].x, points[0].y)
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i - 1] || points[i]
+        const p1 = points[i]
+        const p2 = points[i + 1]
+        const p3 = points[i + 2] || p2
+        const cp1x = p1.x + (p2.x - p0.x) / 6
+        const cp1y = p1.y + (p2.y - p0.y) / 6
+        const cp2x = p2.x - (p3.x - p1.x) / 6
+        const cp2y = p2.y - (p3.y - p1.y) / 6
+        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
+      }
+      ctx.stroke()
+      ctx.restore()
+    }
+
+    function drawMarkerForExport(
+      ctx: CanvasRenderingContext2D,
+      marker: { x: number; y: number; type: string; content: string }
+    ) {
+      const colors = {
+        note: '#409eff',
+        photo: '#67c23a',
+        warning: '#f56c6c',
+        checkpoint: '#e6a23c',
+        milestone: '#909399'
+      }
+      const color = colors[marker.type as keyof typeof colors] || '#409eff'
+      ctx.save()
+      ctx.beginPath()
+      ctx.arc(marker.x, marker.y, props.pointSizeNuber, 0, 2 * Math.PI)
+      ctx.fillStyle = color
+      ctx.fill()
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = props.LineWidthNuber
+      ctx.stroke()
+      ctx.restore()
+    }
+
+    async function captureSegmentImage(segmentIndex: number): Promise<string | null> {
+      const segment = (props.segments as DrawSegment[])[segmentIndex]
+      if (!segment) return null
+
+      const offscreen = document.createElement('canvas')
+      offscreen.width = props.width
+      offscreen.height = props.height
+      const ctx = offscreen.getContext('2d')
+      if (!ctx) return null
+
+      ctx.clearRect(0, 0, props.width, props.height)
+
+      if (props.imageSrc) {
+        const img = new window.Image()
+        img.src = props.imageSrc as string
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve()
+          img.onerror = () => reject()
+        }).catch(() => undefined)
+        if (img.complete) {
+          const { dx, dy, dw, dh } = getImageContainRect(img, props.width, props.height)
+          ctx.drawImage(img, dx, dy, dw, dh)
+        }
+      }
+
+      drawSingleSegmentForExport(ctx, segment, segmentIndex)
+      return offscreen.toDataURL('image/png')
     }
 
     // Catmull-Rom样条转三次贝塞尔
@@ -689,7 +813,8 @@ export default defineComponent({
       confirmAddMarker,
       onMarkerMenuVisibleChange,
       getMarkerTypeColor,
-      getMarkerTypeText
+      getMarkerTypeText,
+      captureSegmentImage
     }
   }
 })
