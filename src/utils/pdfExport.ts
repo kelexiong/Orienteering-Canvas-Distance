@@ -240,6 +240,7 @@ export class PDFExporter {
 
   private getMarkerTypeText(type: string): string {
     const typeMap: Record<string, string> = {
+      landmark: 'Landmark',
       checkpoint: 'Checkpoint',
       water: 'Water Station',
       medical: 'Medical Station',

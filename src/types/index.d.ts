@@ -21,11 +21,14 @@ export interface Marker {
   id: string
   x: number
   y: number
-  type: 'note' | 'photo' | 'warning' | 'checkpoint' | 'milestone'
+  type: 'landmark' | 'note' | 'photo' | 'warning' | 'checkpoint' | 'milestone'
   content: string
   timestamp: Date
   color?: string
 }
+
+/** 实际跑动轨迹 | 对比路线 */
+export type SegmentTrackRole = 'actual' | 'compare'
 
 // 分段日记类型
 export interface Segment {
@@ -38,7 +41,16 @@ export interface Segment {
   updatedAt: Date
   distance?: number
   duration?: number
-  image?: string // 新增：分段截图
+  image?: string // 分段截图
+  /** 同组：一条实际路线 + 若干对比路线 */
+  groupId: string
+  trackRole: SegmentTrackRole
+  /** 对比路线所对应的实际分段 id */
+  parentActualId?: string
+  /** 轨迹线颜色 */
+  color: string
+  /** 结束后仅显示轨迹线，隐藏点位 */
+  finished: boolean
 }
 
 // 项目配置类型

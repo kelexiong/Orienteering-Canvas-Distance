@@ -50,7 +50,7 @@
     <!-- 标记内容输入对话框 -->
     <el-dialog
       v-model="markerDialogVisible"
-      title="添加标记"
+      :title="markerForm.type === 'landmark' ? '添加参照物标记' : '添加标记'"
       width="400px"
       :close-on-click-modal="false"
     >
@@ -77,7 +77,7 @@
 
     <template #footer>
       <el-alert
-        title="提示：可拖动画布、滚轮缩放、点击添加点，支持移动端手势操作"
+        title="提示：拖动画布、双指缩放；绘制模式点击加点；参照物模式点击画布添加图钉标记；每段显示 1→2 前进方向"
         type="info"
         show-icon
         :closable="false"
@@ -89,6 +89,8 @@
 <script lang="ts">
 import { defineComponent, ref, watch, onMounted, nextTick, onUnmounted } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
+import type { Segment } from '../types'
+import { getArrowPositions, DEFAULT_ACTUAL_COLOR, DEFAULT_COMPARE_COLOR } from '../utils/segment'
 
 // 分段颜色数组，放在setup外部
 const segmentColors = [
@@ -114,8 +116,10 @@ export default defineComponent({
     currentSegment: { type: Number, required: true },
     scale: { type: Number, required: true },
     pointSizeNuber: { type: Number, required: true },
+    landmarkSizeNuber: { type: Number, required: true },
     LineWidthNuber: { type: Number, required: true },
     drawing: { type: Boolean, required: true },
+    landmarkMode: { type: Boolean, default: false },
     imageSrc: { type: [String, null], required: true },
     orientation: { type: String, required: true },
     drawMode: { type: String, required: true },
@@ -185,6 +189,7 @@ export default defineComponent({
     const markerDialogVisible = ref(false)
     const markerForm = ref({ type: '', content: '' })
     const markerTypes = [
+      { type: 'landmark', label: '参照物', icon: '📌' },
       { type: 'note', label: '备注', icon: '📝' },
       { type: 'photo', label: '照片', icon: '📷' },
       { type: 'warning', label: '警告', icon: '⚠️' },
@@ -202,11 +207,20 @@ export default defineComponent({
     let pinchAnchorLogical = { x: 0, y: 0 }
 
     function handleCanvasClick(e: MouseEvent) {
-      if (!props.drawing) return
       if (justDragged) return
       const { x, y } = clientToCanvasScreen(e.clientX, e.clientY)
       const realX = (x - offset.value.x) / viewScale.value
       const realY = (y - offset.value.y) / viewScale.value
+
+      if (props.landmarkMode) {
+        currentMarkerPosition = { x: realX, y: realY }
+        markerForm.value.type = 'landmark'
+        markerForm.value.content = ''
+        markerDialogVisible.value = true
+        return
+      }
+
+      if (!props.drawing) return
       emit('add-point', { x: realX, y: realY })
     }
 
@@ -247,6 +261,7 @@ export default defineComponent({
 
     function getMarkerTypeColor(type: string) {
       const colors = {
+        landmark: 'warning',
         note: 'info',
         photo: 'success',
         warning: 'danger',
@@ -258,6 +273,7 @@ export default defineComponent({
 
     function getMarkerTypeText(type: string) {
       const texts = {
+        landmark: '参照物',
         note: '备注',
         photo: '照片',
         warning: '警告',
@@ -303,20 +319,24 @@ export default defineComponent({
       }
     }
 
-    type DrawSegment = {
-      points: Array<{ x: number; y: number; type?: 'line' | 'curve' }>
-      markers: Array<{ x: number; y: number; type: string; content: string }>
+    function getSegmentColor(segment: Segment, segIdx: number) {
+      return (
+        segment.color ||
+        (segment.trackRole === 'compare' ? DEFAULT_COMPARE_COLOR : DEFAULT_ACTUAL_COLOR) ||
+        segmentColors[segIdx % segmentColors.length]
+      )
     }
 
     function drawPointsAndLines(
       ctx: CanvasRenderingContext2D,
-      segmentsToDraw: DrawSegment[] = props.segments as DrawSegment[]
+      segmentsToDraw: Segment[] = props.segments as Segment[]
     ) {
       segmentsToDraw.forEach((segment, segIdx) => {
         ctx.save()
-        ctx.strokeStyle = segmentColors[segIdx % segmentColors.length]
-        ctx.lineWidth = props.LineWidthNuber / viewScale.value // 线宽固定为2像素
-        const seg = segment.points as Array<{ x: number; y: number; type?: 'line' | 'curve' }>
+        const color = getSegmentColor(segment, segIdx)
+        ctx.strokeStyle = color
+        ctx.lineWidth = props.LineWidthNuber / viewScale.value
+        const seg = segment.points
         let i = 1
         while (i < seg.length) {
           // 检查连续curve段
@@ -344,22 +364,34 @@ export default defineComponent({
             i++
           }
         }
-        // 画点
-        seg.forEach(p => {
-          ctx.save()
-          ctx.setTransform(1, 0, 0, 1, 0, 0)
-          ctx.beginPath()
-          ctx.arc(
-            p.x * viewScale.value + offset.value.x,
-            p.y * viewScale.value + offset.value.y,
-            props.pointSizeNuber,
-            0,
-            2 * Math.PI
-          )
-          ctx.fillStyle = 'red'
-          ctx.fill()
-          ctx.restore()
-        })
+        if (seg.length >= 2) {
+          if (segment.finished) {
+            drawArrowsAlongPath(ctx, seg, color)
+          } else {
+            drawSegmentDirectionArrow(ctx, seg, color)
+          }
+        }
+
+        if (!segment.finished) {
+          seg.forEach(p => {
+            ctx.save()
+            ctx.setTransform(1, 0, 0, 1, 0, 0)
+            ctx.beginPath()
+            ctx.arc(
+              p.x * viewScale.value + offset.value.x,
+              p.y * viewScale.value + offset.value.y,
+              props.pointSizeNuber,
+              0,
+              2 * Math.PI
+            )
+            ctx.fillStyle = color
+            ctx.fill()
+            ctx.strokeStyle = '#fff'
+            ctx.lineWidth = 1.5
+            ctx.stroke()
+            ctx.restore()
+          })
+        }
 
         // 画标记点
         if (segment.markers) {
@@ -372,11 +404,12 @@ export default defineComponent({
     }
 
     // 导出用：在未缩放未平移坐标系下绘制单分段，避免分段互相覆盖
-    function drawSingleSegmentForExport(ctx: CanvasRenderingContext2D, segment: DrawSegment, segIdx: number) {
+    function drawSingleSegmentForExport(ctx: CanvasRenderingContext2D, segment: Segment, segIdx: number) {
       const seg = segment.points || []
       if (seg.length > 0) {
         ctx.save()
-        ctx.strokeStyle = segmentColors[segIdx % segmentColors.length]
+        const color = getSegmentColor(segment, segIdx)
+        ctx.strokeStyle = color
         ctx.lineWidth = props.LineWidthNuber
         let i = 1
         while (i < seg.length) {
@@ -401,12 +434,21 @@ export default defineComponent({
             i++
           }
         }
-        seg.forEach(p => {
-          ctx.beginPath()
-          ctx.arc(p.x, p.y, props.pointSizeNuber, 0, 2 * Math.PI)
-          ctx.fillStyle = 'red'
-          ctx.fill()
-        })
+        if (seg.length >= 2) {
+          if (segment.finished) {
+            drawArrowsAlongPath(ctx, seg, color, 1)
+          } else {
+            drawSegmentDirectionArrow(ctx, seg, color, 1)
+          }
+        }
+        if (!segment.finished) {
+          seg.forEach(p => {
+            ctx.beginPath()
+            ctx.arc(p.x, p.y, props.pointSizeNuber, 0, 2 * Math.PI)
+            ctx.fillStyle = color
+            ctx.fill()
+          })
+        }
         ctx.restore()
       }
 
@@ -445,6 +487,7 @@ export default defineComponent({
       marker: { x: number; y: number; type: string; content: string }
     ) {
       const colors = {
+        landmark: '#e6a23c',
         note: '#409eff',
         photo: '#67c23a',
         warning: '#f56c6c',
@@ -453,18 +496,22 @@ export default defineComponent({
       }
       const color = colors[marker.type as keyof typeof colors] || '#409eff'
       ctx.save()
-      ctx.beginPath()
-      ctx.arc(marker.x, marker.y, props.pointSizeNuber, 0, 2 * Math.PI)
-      ctx.fillStyle = color
-      ctx.fill()
-      ctx.strokeStyle = '#fff'
-      ctx.lineWidth = props.LineWidthNuber
-      ctx.stroke()
+      if (marker.type === 'landmark') {
+        drawPinAt(ctx, marker.x, marker.y, color, props.landmarkSizeNuber)
+      } else {
+        ctx.beginPath()
+        ctx.arc(marker.x, marker.y, props.pointSizeNuber, 0, 2 * Math.PI)
+        ctx.fillStyle = color
+        ctx.fill()
+        ctx.strokeStyle = '#fff'
+        ctx.lineWidth = props.LineWidthNuber
+        ctx.stroke()
+      }
       ctx.restore()
     }
 
     async function captureSegmentImage(segmentIndex: number): Promise<string | null> {
-      const segment = (props.segments as DrawSegment[])[segmentIndex]
+      const segment = (props.segments as Segment[])[segmentIndex]
       if (!segment) return null
 
       const offscreen = document.createElement('canvas')
@@ -490,6 +537,71 @@ export default defineComponent({
 
       drawSingleSegmentForExport(ctx, segment, segmentIndex)
       return offscreen.toDataURL('image/png')
+    }
+
+    function drawArrowAt(
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      angle: number,
+      color: string,
+      scale = 1 / viewScale.value
+    ) {
+      const arrowLen = 28 * scale
+      const headLen = 10 * scale
+      const headW = 7 * scale
+      const ux = Math.cos(angle)
+      const uy = Math.sin(angle)
+      const startX = x - ux * arrowLen * 0.35
+      const startY = y - uy * arrowLen * 0.35
+      const endX = x + ux * arrowLen * 0.65
+      const endY = y + uy * arrowLen * 0.65
+
+      ctx.save()
+      ctx.strokeStyle = color
+      ctx.fillStyle = color
+      ctx.lineWidth = Math.max(2 * scale, 1.5)
+      ctx.beginPath()
+      ctx.moveTo(startX, startY)
+      ctx.lineTo(endX, endY)
+      ctx.stroke()
+      const px = -uy
+      const py = ux
+      ctx.beginPath()
+      ctx.moveTo(endX, endY)
+      ctx.lineTo(endX - ux * headLen + px * headW, endY - uy * headLen + py * headW)
+      ctx.lineTo(endX - ux * headLen - px * headW, endY - uy * headLen - py * headW)
+      ctx.closePath()
+      ctx.fill()
+      ctx.restore()
+    }
+
+    /** 绘制中：点1→点2 单箭头 */
+    function drawSegmentDirectionArrow(
+      ctx: CanvasRenderingContext2D,
+      seg: Array<{ x: number; y: number }>,
+      color: string,
+      scale = 1 / viewScale.value
+    ) {
+      const p0 = seg[0]
+      const p1 = seg[1]
+      const dx = p1.x - p0.x
+      const dy = p1.y - p0.y
+      const len = Math.hypot(dx, dy)
+      if (len < 2) return
+      const angle = Math.atan2(dy, dx)
+      const t = getArrowPositions(seg)[0] || { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2, angle }
+      drawArrowAt(ctx, t.x, t.y, t.angle ?? angle, color, scale)
+    }
+
+    /** 已结束分段：沿路径分布最多 5 个方向箭头 */
+    function drawArrowsAlongPath(
+      ctx: CanvasRenderingContext2D,
+      seg: Array<{ x: number; y: number }>,
+      color: string,
+      scale = 1 / viewScale.value
+    ) {
+      getArrowPositions(seg).forEach(pos => drawArrowAt(ctx, pos.x, pos.y, pos.angle, color, scale))
     }
 
     // Catmull-Rom样条转三次贝塞尔
@@ -519,6 +631,7 @@ export default defineComponent({
       marker: { x: number; y: number; type: string; content: string }
     ) {
       const colors = {
+        landmark: '#e6a23c',
         note: '#409eff',
         photo: '#67c23a',
         warning: '#f56c6c',
@@ -526,42 +639,66 @@ export default defineComponent({
         milestone: '#909399'
       }
       const color = colors[marker.type as keyof typeof colors] || '#409eff'
+      const sx = marker.x * viewScale.value + offset.value.x
+      const sy = marker.y * viewScale.value + offset.value.y
 
       ctx.save()
       ctx.setTransform(1, 0, 0, 1, 0, 0)
-      ctx.beginPath()
-      ctx.arc(
-        marker.x * viewScale.value + offset.value.x,
-        marker.y * viewScale.value + offset.value.y,
-        props.pointSizeNuber,
-        0,
-        2 * Math.PI
-      )
-      ctx.fillStyle = color
-      ctx.fill()
-      ctx.strokeStyle = '#fff'
-      ctx.lineWidth = props.LineWidthNuber
-      ctx.stroke()
 
-      // 绘制标记图标
+      if (marker.type === 'landmark') {
+        drawPinAt(ctx, sx, sy, color, props.landmarkSizeNuber)
+      } else {
+        ctx.beginPath()
+        ctx.arc(sx, sy, props.pointSizeNuber, 0, 2 * Math.PI)
+        ctx.fillStyle = color
+        ctx.fill()
+        ctx.strokeStyle = '#fff'
+        ctx.lineWidth = props.LineWidthNuber
+        ctx.stroke()
+        const icons = {
+          note: '📝',
+          photo: '📷',
+          warning: '⚠️',
+          checkpoint: '✓',
+          milestone: '⭐'
+        }
+        const icon = icons[marker.type as keyof typeof icons] || '📍'
+        ctx.fillStyle = '#fff'
+        ctx.font = '12px Arial'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(icon, sx, sy)
+      }
+      ctx.restore()
+    }
+
+    function drawPinAt(
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      color: string,
+      size: number
+    ) {
+      const r = size * 0.45
+      ctx.fillStyle = color
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(x, y - r * 0.3, r, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(x, y + r * 0.5)
+      ctx.lineTo(x - r * 0.55, y - r * 0.1)
+      ctx.lineTo(x + r * 0.55, y - r * 0.1)
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
       ctx.fillStyle = '#fff'
-      ctx.font = '12px Arial'
+      ctx.font = `bold ${Math.max(10, r)}px Arial`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      const icons = {
-        note: '📝',
-        photo: '📷',
-        warning: '⚠️',
-        checkpoint: '✓',
-        milestone: '⭐'
-      }
-      const icon = icons[marker.type as keyof typeof icons] || '📍'
-      ctx.fillText(
-        icon,
-        marker.x * viewScale.value + offset.value.x,
-        marker.y * viewScale.value + offset.value.y
-      )
-      ctx.restore()
+      ctx.fillText('📌', x, y - r * 0.35)
     }
 
     function drawAll() {
@@ -726,18 +863,19 @@ export default defineComponent({
       }
 
       // 如果不是长按且没有拖拽，则添加点位
-      if (
-        !wasPinching &&
-        !isLongPress &&
-        !justDragged &&
-        props.drawing &&
-        e.changedTouches.length === 1
-      ) {
+      if (!wasPinching && !isLongPress && !justDragged && e.changedTouches.length === 1) {
         const touch = e.changedTouches[0]
         const { x, y } = clientToCanvasScreen(touch.clientX, touch.clientY)
         const realX = (x - offset.value.x) / viewScale.value
         const realY = (y - offset.value.y) / viewScale.value
-        emit('add-point', { x: realX, y: realY })
+        if (props.landmarkMode) {
+          currentMarkerPosition = { x: realX, y: realY }
+          markerForm.value.type = 'landmark'
+          markerForm.value.content = ''
+          markerDialogVisible.value = true
+        } else if (props.drawing) {
+          emit('add-point', { x: realX, y: realY })
+        }
       }
 
       dragging = false

@@ -13,15 +13,17 @@
           :width="canvasWidth"
           :height="canvasHeight"
           :current-segment="currentSegment"
-          :scale="scale"
+          :scale="mapScaleDenominator"
           :pointSizeNuber="pointSizeNuber"
+          :landmarkSizeNuber="landmarkSizeNuber"
           :LineWidthNuber="LineWidthNuber"
           :drawing="drawing"
+          :landmark-mode="landmarkMode"
           :image-src="imageSrc"
           :orientation="orientation"
           :edit-mode="editMode"
           @add-point="addPoint"
-          @add-marker="addMarker"
+          @add-marker="onAddMarker"
           class="home-canvas"
           ref="canvasRef"
         />
@@ -34,68 +36,33 @@
           shadow="hover"
           v-if="!isMobile"
         >
-          <div class="panel-section">
-            <el-button
-              size="large"
-              type="success"
-              @click="drawing = !drawing"
-              class="animate__animated animate__pulse animate__infinite"
-            >
-              <el-icon><Edit /></el-icon>
-              {{ drawing ? '结束绘制' : '开始绘制' }}
-            </el-button>
-            <el-popconfirm title="确定要清除所有点位吗？" @confirm="clearPoints">
-              <template #reference>
-                <el-button size="large" type="danger">
-                  <el-icon><Delete /></el-icon>
-                  清除点位
-                </el-button>
-              </template>
-            </el-popconfirm>
-            <el-button size="large" type="info" @click="triggerImageUpload">
-              <el-icon><Picture /></el-icon>
-              插入图片
-            </el-button>
-            <el-button size="large" type="warning" @click="toggleOrientation">
-              <el-icon><Refresh /></el-icon>
-              切换为{{ orientation === 'landscape' ? '纵向' : '横向' }}
-            </el-button>
-            <el-button size="large" @click="drawMode = drawMode === 'line' ? 'curve' : 'line'">
-              <el-icon><Connection /></el-icon>
-              切换为{{ drawMode === 'line' ? '曲线' : '直线' }}
-            </el-button>
-            <input
-              ref="fileInput"
-              type="file"
-              accept="image/*"
-              style="display: none"
-              @change="onImageChange"
-            />
-          </div>
-          <el-divider />
-          <div class="segment-toolbar">
-            <el-button type="primary" @click="addSegment" plain>新增分段</el-button>
-            <el-button
-              v-for="(seg, idx) in segments"
-              :key="idx"
-              :type="idx === currentSegment ? 'primary' : 'default'"
-              @click="setCurrentSegment(idx)"
-              style="margin-left: 8px"
-            >
-              分段{{ idx + 1 }}
-            </el-button>
-          </div>
-          <el-form class="home-scale-input" inline>
-            <el-form-item label="比例尺">
-              <el-input-number v-model="scale" :min="0.01" :step="0.01" />
-            </el-form-item>
-            <el-form-item label="画点大小">
-              <el-input-number v-model="pointSizeNuber" :min="2" :step="1" />
-            </el-form-item>
-            <el-form-item label="连线大小">
-              <el-input-number v-model="LineWidthNuber" :min="2" :step="1" />
-            </el-form-item>
-          </el-form>
+          <ControlPanel
+            :drawing="drawing"
+            :draw-mode="drawMode"
+            :orientation="orientation"
+            :landmark-mode="landmarkMode"
+            :current-segment="currentSegment"
+            :segments="segments"
+            v-model:scale-enabled="scaleEnabled"
+            v-model:map-scale-denominator="mapScaleDenominator"
+            :point-size="pointSizeNuber"
+            :line-width="LineWidthNuber"
+            :landmark-size="landmarkSizeNuber"
+            :segment-groups="segmentGroups"
+            @toggle-drawing="onToggleDrawing"
+            @clear-points="clearPoints"
+            @upload-image="triggerImageUpload"
+            @toggle-orientation="toggleOrientation"
+            @toggle-draw-mode="drawMode = drawMode === 'line' ? 'curve' : 'line'"
+            @toggle-landmark-mode="toggleLandmarkMode"
+            @add-compare-route="addCompareRoute"
+            @add-segment-group="addSegmentGroup"
+            @switch-segment="setCurrentSegment"
+            @update-segment-color="updateSegmentColor"
+            @update:point-size="pointSizeNuber = $event"
+            @update:line-width="LineWidthNuber = $event"
+            @update:landmark-size="landmarkSizeNuber = $event"
+          />
         </el-card>
         <!-- 移动端操作面板Drawer -->
         <el-drawer
@@ -106,68 +73,32 @@
           class="panel-drawer animate__animated animate__slideInRight"
         >
           <el-card class="panel-card animate__animated animate__fadeInUp" shadow="hover">
-            <div class="panel-section">
-              <el-button
-                size="large"
-                type="success"
-                @click="drawing = !drawing"
-                class="animate__animated animate__pulse animate__infinite"
-              >
-                <el-icon><Edit /></el-icon>
-                {{ drawing ? '结束绘制' : '开始绘制' }}
-              </el-button>
-              <el-popconfirm title="确定要清除所有点位吗？" @confirm="clearPoints">
-                <template #reference>
-                  <el-button size="large" type="danger">
-                    <el-icon><Delete /></el-icon>
-                    清除点位
-                  </el-button>
-                </template>
-              </el-popconfirm>
-              <el-button size="large" type="info" @click="triggerImageUpload">
-                <el-icon><Picture /></el-icon>
-                插入图片
-              </el-button>
-              <el-button size="large" type="warning" @click="toggleOrientation">
-                <el-icon><Refresh /></el-icon>
-                切换为{{ orientation === 'landscape' ? '纵向' : '横向' }}
-              </el-button>
-              <el-button size="large" @click="drawMode = drawMode === 'line' ? 'curve' : 'line'">
-                <el-icon><Connection /></el-icon>
-                切换为{{ drawMode === 'line' ? '曲线' : '直线' }}
-              </el-button>
-              <input
-                ref="fileInput"
-                type="file"
-                accept="image/*"
-                style="display: none"
-                @change="onImageChange"
-              />
-            </div>
-            <el-divider />
-            <div class="segment-toolbar">
-              <el-button type="primary" @click="addSegment" plain>新增分段</el-button>
-              <el-button
-                v-for="(seg, idx) in segments"
-                :key="idx"
-                :type="idx === currentSegment ? 'primary' : 'default'"
-                @click="setCurrentSegment(idx)"
-                style="margin-left: 8px"
-              >
-                分段{{ idx + 1 }}
-              </el-button>
-            </div>
-            <el-form class="home-scale-input" inline>
-              <el-form-item label="比例尺">
-                <el-input-number v-model="scale" :min="0.01" :step="0.01" />
-              </el-form-item>
-              <el-form-item label="画点大小">
-                <el-input-number v-model="pointSizeNuber" :min="2" :step="1" />
-              </el-form-item>
-              <el-form-item label="连线大小">
-                <el-input-number v-model="LineWidthNuber" :min="2" :step="1" />
-              </el-form-item>
-            </el-form>
+            <ControlPanel
+              :drawing="drawing"
+              :draw-mode="drawMode"
+              :orientation="orientation"
+              :landmark-mode="landmarkMode"
+              :current-segment="currentSegment"
+              :segment-groups="segmentGroups"
+              v-model:scale-enabled="scaleEnabled"
+              v-model:map-scale-denominator="mapScaleDenominator"
+              :point-size="pointSizeNuber"
+              :line-width="LineWidthNuber"
+              :landmark-size="landmarkSizeNuber"
+              @toggle-drawing="onToggleDrawing"
+              @clear-points="clearPoints"
+              @upload-image="triggerImageUpload"
+              @toggle-orientation="toggleOrientation"
+              @toggle-draw-mode="drawMode = drawMode === 'line' ? 'curve' : 'line'"
+              @toggle-landmark-mode="toggleLandmarkMode"
+              @add-compare-route="addCompareRoute"
+              @add-segment-group="addSegmentGroup"
+              @switch-segment="setCurrentSegment"
+              @update-segment-color="updateSegmentColor"
+              @update:point-size="pointSizeNuber = $event"
+              @update:line-width="LineWidthNuber = $event"
+              @update:landmark-size="landmarkSizeNuber = $event"
+            />
           </el-card>
         </el-drawer>
         <!-- 移动端操作按钮 -->
@@ -184,21 +115,36 @@
         <el-card class="pointlist-card animate__animated animate__fadeInUp" shadow="hover">
           <DiaryList
             :segment="segments[currentSegment]"
-            :scale="scale"
+            :scale-enabled="scaleEnabled"
+            :map-scale-denominator="mapScaleDenominator"
+            :orientation="orientation"
             :segment-index="currentSegment"
             :all-segments="segments"
+            :landmark-size="landmarkSizeNuber"
             :canvas-element="getCanvasElement()"
             @remove-point="removePoint"
             @insert-point-mode="onInsertPointMode"
             @edit-point-mode="onEditPointMode"
             @toggle-type="togglePointType"
-            @update-segment-description="updateSegmentDescription"
+            :landmark-mode="landmarkMode"
+            :drawing="drawing"
             @update-point-description="updatePointDescription"
             @remove-marker="removeMarker"
+            @update-marker-description="updateMarkerDescription"
+            @toggle-landmark-mode="toggleLandmarkMode"
           />
         </el-card>
       </el-main>
     </el-container>
+
+    <input
+      ref="fileInput"
+      type="file"
+      accept="image/*"
+      style="display: none"
+      @change="onImageChange"
+    />
+
   </div>
 </template>
 
@@ -206,19 +152,19 @@
 import { defineComponent, ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Canvas from '../components/Canvas.vue'
 import DiaryList from '../components/DiaryList.vue'
-import { Compass, Edit, Delete, Picture, Refresh, Connection, Menu } from '@element-plus/icons-vue'
+import ControlPanel from '../components/ControlPanel.vue'
+import { ElMessage } from 'element-plus'
+import { Compass, Menu } from '@element-plus/icons-vue'
 import type { Segment, Point, Marker } from '../types'
+import { MAP_SCALE_PRESETS } from '../utils/mapScale'
+import { createSegment, buildSegmentGroups } from '../utils/segment'
 
 export default defineComponent({
   components: {
     Canvas,
     DiaryList,
+    ControlPanel,
     Compass,
-    Edit,
-    Delete,
-    Picture,
-    Refresh,
-    Connection,
     Menu
   },
   setup() {
@@ -232,21 +178,28 @@ export default defineComponent({
 
     // 自定义Hook管理点位逻辑 - 使用新的Segment数据结构
     const segments = ref<Segment[]>([
-      {
-        id: '1',
-        name: '分段1',
-        points: [],
-        markers: [],
-        description: '',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }
+      createSegment({
+        name: '实际路线1',
+        trackRole: 'actual',
+        groupId: 'group-1'
+      })
     ])
     const currentSegment = ref(0)
     const insertMode = ref<{ segIdx: number; ptIdx: number } | null>(null)
     const editMode = ref<{ segIdx: number; ptIdx: number } | null>(null)
 
+    const resumeSegmentEditing = (segIdx: number) => {
+      const seg = segments.value[segIdx]
+      if (seg?.finished) {
+        seg.finished = false
+        seg.updatedAt = new Date()
+      }
+    }
+
     const addPoint = (point: { x: number; y: number }) => {
+      const cur = segments.value[currentSegment.value]
+      if (!cur) return
+      if (cur.finished && !drawing.value) return
       const type = drawMode.value // 'line' 或 'curve'
       const newPoint: Point = {
         ...point,
@@ -271,17 +224,6 @@ export default defineComponent({
         drawing.value = false
       } else {
         // 普通追加
-        if (!segments.value[currentSegment.value]) {
-          segments.value[currentSegment.value] = {
-            id: Date.now().toString(),
-            name: `分段${currentSegment.value + 1}`,
-            points: [],
-            markers: [],
-            description: '',
-            createdAt: new Date(),
-            updatedAt: new Date()
-          }
-        }
         if (segments.value[currentSegment.value].points.length === 0) {
           segments.value[currentSegment.value].points.push({ ...newPoint, type: undefined })
         } else {
@@ -299,6 +241,7 @@ export default defineComponent({
     }
 
     const removePoint = (segIdx: number, ptIdx: number) => {
+      resumeSegmentEditing(segIdx)
       if (segments.value[segIdx] && segments.value[segIdx].points[ptIdx] !== undefined) {
         segments.value[segIdx].points.splice(ptIdx, 1)
         segments.value[segIdx].updatedAt = new Date()
@@ -322,48 +265,107 @@ export default defineComponent({
 
     const clearPoints = () => {
       segments.value = [
-        {
-          id: '1',
-          name: '分段1',
-          points: [],
-          markers: [],
-          description: '',
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
+        createSegment({
+          name: '实际路线1',
+          trackRole: 'actual',
+          groupId: 'group-1'
+        })
       ]
       currentSegment.value = 0
+      drawing.value = false
+      landmarkMode.value = false
     }
 
-    const addSegment = async () => {
-      // 缓存当前分段独立截图，避免后续分段覆盖导出内容
-      if (canvasRef.value?.captureSegmentImage && segments.value[currentSegment.value]) {
-        const image = await canvasRef.value.captureSegmentImage(currentSegment.value)
-        if (image) segments.value[currentSegment.value].image = image
+    const cacheSegmentImage = async (idx: number) => {
+      if (canvasRef.value?.captureSegmentImage && segments.value[idx]) {
+        const image = await canvasRef.value.captureSegmentImage(idx)
+        if (image) segments.value[idx].image = image
       }
-      // 新增分段
-      const newSegment: Segment = {
-        id: Date.now().toString(),
-        name: `分段${segments.value.length + 1}`,
-        points: [],
-        markers: [],
-        description: '',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        image: '' // 新分段初始无截图
+    }
+
+    const finishCurrentSegment = async () => {
+      const seg = segments.value[currentSegment.value]
+      if (!seg || seg.finished) return
+      if (seg.points.length < 2) {
+        ElMessage.warning('至少需要 2 个点才能结束分段')
+        return
       }
-      segments.value.push(newSegment)
+      await cacheSegmentImage(currentSegment.value)
+      seg.finished = true
+      seg.updatedAt = new Date()
+      drawing.value = false
+      landmarkMode.value = false
+      ElMessage.success(
+        seg.trackRole === 'compare' ? '对比路线已固定为轨迹线' : '实际跑动路线已固定为轨迹线'
+      )
+    }
+
+    const findFinishedActualInGroup = (groupId: string) =>
+      segments.value.find(s => s.groupId === groupId && s.trackRole === 'actual' && s.finished)
+
+    const addCompareRoute = async (groupId?: string) => {
+      const gid =
+        groupId || segments.value[currentSegment.value]?.groupId
+      if (!gid) return
+      const actual = findFinishedActualInGroup(gid)
+      if (!actual) {
+        ElMessage.warning('请先「结束绘制」实际跑动路线，再添加对比路线')
+        return
+      }
+      const cur = segments.value[currentSegment.value]
+      if (cur && drawing.value && cur.points.length > 0) {
+        await finishCurrentSegment()
+      }
+      const compareCount = segments.value.filter(
+        s => s.groupId === gid && s.trackRole === 'compare'
+      ).length
+      const newSeg = createSegment({
+        name: `对比路线${compareCount + 1}`,
+        trackRole: 'compare',
+        groupId: gid,
+        parentActualId: actual.id
+      })
+      segments.value.push(newSeg)
       currentSegment.value = segments.value.length - 1
+      drawing.value = false
+      landmarkMode.value = false
+    }
+
+    const addSegmentGroup = async () => {
+      const cur = segments.value[currentSegment.value]
+      if (cur && drawing.value && cur.points.length > 0) {
+        await finishCurrentSegment()
+      } else if (cur && !cur.finished && cur.points.length >= 2) {
+        await finishCurrentSegment()
+      }
+      const groupId = `group-${Date.now()}`
+      const groupCount = new Set(segments.value.map(s => s.groupId)).size
+      const newSeg = createSegment({
+        name: `实际跑动`,
+        trackRole: 'actual',
+        groupId
+      })
+      segments.value.push(newSeg)
+      currentSegment.value = segments.value.length - 1
+      drawing.value = false
+      landmarkMode.value = false
+      ElMessage.success(`已新增分段${groupCount + 1}`)
+    }
+
+    const updateSegmentColor = (segIdx: number, color: string) => {
+      if (segments.value[segIdx]) {
+        segments.value[segIdx].color = color
+        segments.value[segIdx].updatedAt = new Date()
+      }
     }
 
     const setCurrentSegment = async (idx: number) => {
-      // 切换前，缓存当前分段独立截图
-      if (canvasRef.value?.captureSegmentImage && segments.value[currentSegment.value]) {
-        const image = await canvasRef.value.captureSegmentImage(currentSegment.value)
-        if (image) segments.value[currentSegment.value].image = image
-      }
+      await cacheSegmentImage(currentSegment.value)
       if (idx >= 0 && idx < segments.value.length) {
         currentSegment.value = idx
+        if (segments.value[idx].finished) {
+          drawing.value = false
+        }
       }
     }
 
@@ -376,6 +378,16 @@ export default defineComponent({
     }
 
     // 新增：更新点位描述
+    const updateMarkerDescription = (segIdx: number, markerId: string, content: string) => {
+      const seg = segments.value[segIdx]
+      if (!seg) return
+      const m = seg.markers.find(x => x.id === markerId)
+      if (m) {
+        m.content = content
+        seg.updatedAt = new Date()
+      }
+    }
+
     const updatePointDescription = (segIdx: number, ptIdx: number, description: string) => {
       if (segments.value[segIdx] && segments.value[segIdx].points[ptIdx]) {
         segments.value[segIdx].points[ptIdx].description = description
@@ -409,8 +421,12 @@ export default defineComponent({
 
     // 自定义Hook管理画布设置
     const orientation = ref<'landscape' | 'portrait'>('landscape')
-    const scale = ref(1)
+    const scaleEnabled = ref(false)
+    const mapScaleDenominator = ref(10000)
+    const mapScalePresets = MAP_SCALE_PRESETS
+    const landmarkMode = ref(false)
     const pointSizeNuber = ref(2)
+    const landmarkSizeNuber = ref(10)
     const LineWidthNuber = ref(2)
     const canvasWidth = computed(() => {
       return orientation.value === 'landscape' ? 842 : 595
@@ -420,6 +436,8 @@ export default defineComponent({
       return orientation.value === 'landscape' ? 595 : 842
     })
 
+    const segmentGroups = computed(() => buildSegmentGroups(segments.value))
+
     const toggleOrientation = () => {
       orientation.value = orientation.value === 'landscape' ? 'portrait' : 'landscape'
     }
@@ -427,8 +445,53 @@ export default defineComponent({
     // 监听模式变化，动态修改 body 的 cursor
     const isEditOrInsertMode = computed(() => !!editMode.value || !!insertMode.value)
     watch(isEditOrInsertMode, val => {
-      document.body.style.cursor = val ? 'crosshair' : ''
+      if (!landmarkMode.value) {
+        document.body.style.cursor = val ? 'crosshair' : ''
+      }
     })
+
+    watch(landmarkMode, val => {
+      document.body.style.cursor = val ? 'cell' : ''
+      if (val) drawing.value = false
+    })
+
+    const onToggleDrawing = async () => {
+      const seg = segments.value[currentSegment.value]
+      if (!seg) return
+
+      if (drawing.value) {
+        drawing.value = false
+        landmarkMode.value = false
+        editMode.value = null
+        insertMode.value = null
+        if (seg.points.length >= 2 && !seg.finished) {
+          await finishCurrentSegment()
+        } else if (seg.points.length > 0 && seg.points.length < 2) {
+          ElMessage.warning('至少需要 2 个点；可继续绘制或删除点位')
+        }
+      } else {
+        if (seg.finished) {
+          resumeSegmentEditing(currentSegment.value)
+          ElMessage.info('已进入编辑模式，修改后请再次「结束绘制」以固化轨迹')
+        }
+        drawing.value = true
+        landmarkMode.value = false
+      }
+    }
+
+    const toggleLandmarkMode = () => {
+      landmarkMode.value = !landmarkMode.value
+      if (landmarkMode.value) {
+        drawing.value = false
+        editMode.value = null
+        insertMode.value = null
+      }
+    }
+
+    const onAddMarker = (marker: Omit<Marker, 'id' | 'timestamp'>) => {
+      addMarker(currentSegment.value, marker)
+      landmarkMode.value = false
+    }
 
     // 横屏检测与自动横屏
     function checkOrientation() {
@@ -466,10 +529,12 @@ export default defineComponent({
 
     // 新增：切换type
     const togglePointType = (segIdx: number, ptIdx: number) => {
+      resumeSegmentEditing(segIdx)
       const pt = segments.value[segIdx].points[ptIdx]
       if (!pt) return
       const newType = !pt.type || pt.type === 'line' ? 'curve' : 'line'
       segments.value[segIdx].points.splice(ptIdx, 1, { ...pt, type: newType })
+      segments.value[segIdx].updatedAt = new Date()
     }
 
     // 获取canvas元素
@@ -498,18 +563,23 @@ export default defineComponent({
       editMode,
       loading,
       drawMode,
-      scale,
-      pointSizeNuber,
-      LineWidthNuber,
-      drawing,
-      imageSrc,
-      clearPoints,
-      removePoint,
-      addSegment,
-      addPoint,
+      scaleEnabled,
+      mapScaleDenominator,
+      mapScalePresets,
+      landmarkMode,
+      landmarkSizeNuber,
+      segmentGroups,
+      finishCurrentSegment,
+      addCompareRoute,
+      addSegmentGroup,
+      updateSegmentColor,
+      updateMarkerDescription,
+      onToggleDrawing,
+      toggleLandmarkMode,
+      onAddMarker,
       triggerImageUpload: () => {
+        loading.value = true
         fileInput.value?.click()
-        loading.value = true // 激活加载状态
       },
       onImageChange: (e: Event) => {
         const files = (e.target as HTMLInputElement).files
@@ -517,23 +587,34 @@ export default defineComponent({
           const reader = new FileReader()
           reader.onload = evt => {
             imageSrc.value = evt.target?.result as string
-            loading.value = false // 图片加载完成，关闭加载状态
+            loading.value = false
           }
           reader.readAsDataURL(files[0])
+        } else {
+          loading.value = false
         }
       },
+      pointSizeNuber,
+      LineWidthNuber,
+      drawing,
+      imageSrc,
+      clearPoints,
+      removePoint,
+      addPoint,
       fileInput,
       orientation,
       toggleOrientation,
       onInsertPointMode: (segIdx: number, ptIdx: number) => {
+        resumeSegmentEditing(segIdx)
         insertMode.value = { segIdx, ptIdx: ptIdx + 1 }
         editMode.value = null
-        drawing.value = true // 可选，自动开启绘制
+        drawing.value = true
       },
       onEditPointMode: (segIdx: number, ptIdx: number) => {
+        resumeSegmentEditing(segIdx)
         editMode.value = { segIdx, ptIdx }
         insertMode.value = null
-        drawing.value = true // 可选，自动开启绘制
+        drawing.value = true
       },
       canvasWidth,
       canvasHeight,
@@ -631,34 +712,16 @@ export default defineComponent({
   box-shadow: 0 2px 12px #409eff22;
   background: #f7fbff;
   margin-bottom: 18px;
-  padding: 18px 12px;
-}
-.panel-section {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.segment-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.home-scale-input {
-  margin-top: 12px;
-  .el-input-number {
-    width: 120px;
-    font-size: 16px;
-  }
+  padding: 14px 12px;
 }
 .pointlist-card {
   border-radius: 16px;
   box-shadow: 0 2px 12px #409eff22;
   background: #fff;
   margin-bottom: 18px;
-  padding: 18px 12px;
-  height: 300px;
+  padding: 12px 10px;
+  min-height: 280px;
+  max-height: min(55vh, 520px);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -682,7 +745,8 @@ export default defineComponent({
     padding-left: 8px;
   }
   .panel-main {
-    width: 320px;
+    width: 340px;
+    min-width: 300px;
     padding-right: 8px;
   }
 }
@@ -734,17 +798,6 @@ export default defineComponent({
     border-radius: 12px;
     margin-bottom: 10px;
     padding: 10px 4px;
-  }
-  .panel-section {
-    gap: 10px;
-  }
-  .segment-toolbar {
-    gap: 4px;
-    .el-button {
-      width: 48%;
-      min-width: 90px;
-      font-size: 14px;
-    }
   }
   .drawer-btn {
     bottom: 18px;

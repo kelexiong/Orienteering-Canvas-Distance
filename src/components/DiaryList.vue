@@ -2,335 +2,402 @@
   <el-card class="diary-card animate__animated animate__fadeInUp" shadow="hover">
     <template #header>
       <div class="diary-header">
-        <el-icon style="color: #409eff; margin-right: 6px"><Document /></el-icon>
-        <span>定向日记</span>
+        <el-icon style="color: #409eff; margin-right: 6px"><List /></el-icon>
+        <span>记录面板</span>
         <el-dropdown @command="handleExportCommand" class="export-dropdown">
           <el-button type="primary" size="small" class="export-btn">
             <el-icon><Download /></el-icon>
-            导出PDF
+            导出
             <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="current-segment">
-                <el-icon><Document /></el-icon>
-                导出当前分段
-              </el-dropdown-item>
-              <el-dropdown-item command="all-segments">
-                <el-icon><Files /></el-icon>
-                导出所有分段
-              </el-dropdown-item>
+              <el-dropdown-item command="current-segment">导出当前分段</el-dropdown-item>
+              <el-dropdown-item command="all-segments">导出所有分段</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
       </div>
     </template>
 
-    <!-- 分段描述输入 -->
-    <div class="segment-description">
-      <el-input
-        v-model="segmentDescription"
-        type="textarea"
-        :rows="3"
-        placeholder="描述这段路线的意义、感受或注意事项..."
-        @input="updateSegmentDescription"
+    <el-alert
+      v-if="segment.finished && !drawing"
+      type="success"
+      :closable="false"
+      show-icon
+      class="finished-tip"
+      title="已结束绘制：画布显示轨迹线与方向箭头。点击「开始绘制」可继续编辑点位。"
+    />
+
+    <el-tag
+      class="role-tag"
+      :type="segment.trackRole === 'compare' ? 'warning' : 'primary'"
+      effect="dark"
+      size="small"
+    >
+      {{ segment.trackRole === 'compare' ? '对比路线' : '实际跑动' }}
+    </el-tag>
+
+    <!-- 本组路线对比（实际 vs 对比路线） -->
+    <div v-if="groupCompare" class="group-compare-box">
+      <h4 class="section-title">
+        <el-icon><DataAnalysis /></el-icon>
+        本组路线对比
+      </h4>
+      <div class="compare-actual">
+        <span class="color-dot" :style="{ background: groupCompare.actual.segment.color }" />
+        <strong>{{ groupCompare.actual.roleLabel }}</strong>
+        <span>{{ formatLen(groupCompare.actual.meters) }}</span>
+      </div>
+      <div
+        v-for="row in groupCompare.compares"
+        :key="row.segment.id"
+        class="compare-row"
+      >
+        <span class="color-dot" :style="{ background: row.segment.color }" />
+        <span>{{ row.roleLabel }}</span>
+        <span>{{ formatLen(row.meters) }}</span>
+        <el-tag
+          v-if="groupCompare.actual.meters > 0"
+          size="small"
+          :type="row.meters > groupCompare.actual.meters ? 'danger' : 'success'"
+        >
+          {{ diffPercent(row.meters, groupCompare.actual.meters) }}
+        </el-tag>
+      </div>
+      <el-empty
+        v-if="groupCompare.compares.length === 0"
+        description="结束实际路线后，可「新增对比路线」并在本组内对比长度"
+        :image-size="48"
       />
     </div>
 
-    <!-- 点位列表 -->
+    <div v-if="points.length >= 2" class="segment-route-length">
+      <el-text type="primary">
+        本段路线：<strong>{{ currentSegmentLengthText }}</strong>
+      </el-text>
+    </div>
+
+    <!-- 点位记录 -->
     <div class="points-section" v-if="points.length > 0">
       <h4 class="section-title">
         <el-icon><Location /></el-icon>
-        轨迹点位 ({{ points.length }}个)
+        点位记录 ({{ points.length }})
       </h4>
-      <el-timeline>
-        <el-timeline-item
+      <div class="point-records">
+        <div
           v-for="(point, index) in points"
           :key="index"
-          :timestamp="`点位 ${index + 1}`"
-          :type="point.type === 'curve' ? 'success' : 'primary'"
-          size="large"
+          class="point-record-row"
+          :class="{ 'is-finished-route': segment.finished && !drawing }"
         >
-          <el-card class="point-card" shadow="hover">
-            <div class="point-info">
-              <div class="point-coords">
-                <el-tag size="small" type="info">
-                  ({{ point.x.toFixed(1) }}, {{ point.y.toFixed(1) }})
-                </el-tag>
-                <el-tag :type="point.type === 'curve' ? 'success' : 'warning'" size="small">
-                  {{ point.type === 'curve' ? '曲线' : '直线' }}
-                </el-tag>
-              </div>
-              <div class="point-distance" v-if="index > 0">
-                <el-text type="info" size="small">
-                  距离: {{ (getDistance(points[index - 1], point) * scale).toFixed(2) }}m
-                </el-text>
-              </div>
-              <div class="point-description">
-                <el-input
-                  v-model="point.description"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="添加点位备注..."
-                  @input="updatePointDescription(index)"
-                />
-              </div>
-            </div>
-            <div class="point-actions">
-              <el-button-group>
-                <el-button
-                  size="small"
-                  type="primary"
-                  @click="$emit('edit-point-mode', segmentIndex, index)"
-                >
-                  编辑
-                </el-button>
-                <el-button
-                  size="small"
-                  type="danger"
-                  @click="$emit('remove-point', segmentIndex, index)"
-                >
-                  删除
-                </el-button>
-                <el-button
-                  size="small"
-                  type="warning"
-                  @click="$emit('insert-point-mode', segmentIndex, index)"
-                >
-                  插入
-                </el-button>
-                <el-button size="small" @click="$emit('toggle-type', segmentIndex, index)">
-                  切换类型
-                </el-button>
-              </el-button-group>
-            </div>
-          </el-card>
-        </el-timeline-item>
-      </el-timeline>
-    </div>
-
-    <!-- 特殊标记列表 -->
-    <div class="markers-section" v-if="markers.length > 0">
-      <h4 class="section-title">
-        <el-icon><Star /></el-icon>
-        特殊标记 ({{ markers.length }}个)
-      </h4>
-      <div class="markers-list">
-        <el-card v-for="marker in markers" :key="marker.id" class="marker-card" shadow="hover">
-          <div class="marker-header">
-            <el-tag :type="getMarkerTypeColor(marker.type)" size="small">
-              {{ getMarkerTypeText(marker.type) }}
+          <div class="point-record-main">
+            <el-tag size="small" type="primary" effect="dark">{{ index + 1 }}</el-tag>
+            <el-tag size="small" type="info">
+              ({{ point.x.toFixed(0) }}, {{ point.y.toFixed(0) }})
             </el-tag>
-            <el-text type="info" size="small">
-              {{ formatTime(marker.timestamp) }}
+            <el-tag
+              v-if="point.type"
+              size="small"
+              :type="point.type === 'curve' ? 'success' : 'warning'"
+            >
+              {{ point.type === 'curve' ? '曲线' : '直线' }}
+            </el-tag>
+            <el-text v-if="index > 0" type="info" size="small" class="point-gap-dist">
+              ↑ {{ formatPointDistance(points[index - 1], point) }}
             </el-text>
           </div>
-          <div class="marker-content">
-            {{ marker.content }}
+          <div class="point-record-actions">
+            <el-button
+              size="small"
+              :type="descOpenIndex === index ? 'primary' : 'default'"
+              text
+              @click="toggleDesc(index)"
+            >
+              描述
+            </el-button>
+            <el-button
+              size="small"
+              text
+              type="primary"
+              @click="$emit('edit-point-mode', segmentIndex, index)"
+            >
+              编辑
+            </el-button>
+            <el-button
+              size="small"
+              text
+              type="danger"
+              @click="$emit('remove-point', segmentIndex, index)"
+            >
+              删除
+            </el-button>
+            <el-dropdown trigger="click" @command="(cmd: string) => onPointMore(cmd, index)">
+              <el-button size="small" text>更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="insert">插入点</el-dropdown-item>
+                  <el-dropdown-item command="toggle-type">切换线型</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
-          <div class="marker-actions">
-            <el-button size="small" type="danger" @click="removeMarker(marker.id)">
+          <div v-if="descOpenIndex === index" class="point-desc-input">
+            <el-input
+              v-model="point.description"
+              type="textarea"
+              :rows="2"
+              placeholder="点位描述（可选）"
+              @input="updatePointDescription(index)"
+            />
+          </div>
+        </div>
+      </div>
+      <el-button
+        type="primary"
+        size="small"
+        plain
+        class="append-point-btn"
+        @click="$emit('insert-point-mode', segmentIndex, points.length - 1)"
+      >
+        <el-icon><Plus /></el-icon>
+        末尾加点
+      </el-button>
+    </div>
+
+    <el-empty
+      v-else-if="markers.length === 0"
+      description="开始绘制轨迹，生成点位记录"
+      :image-size="64"
+    />
+
+    <el-divider v-if="points.length > 0" />
+
+    <!-- 参照物标记 -->
+    <div class="markers-section">
+      <h4 class="section-title">
+        <el-icon><LocationFilled /></el-icon>
+        参照物图钉
+      </h4>
+      <div class="marker-action-bar">
+        <el-button
+          :type="landmarkMode ? 'warning' : 'default'"
+          size="small"
+          @click="$emit('toggle-landmark-mode')"
+        >
+          <el-icon><LocationFilled /></el-icon>
+          {{ landmarkMode ? '点击画布放置' : '标记参照物' }}
+        </el-button>
+        <el-text type="info" size="small">图钉大小在操作面板调节</el-text>
+      </div>
+
+      <div v-if="markers.length > 0" class="markers-list">
+        <div v-for="marker in markers" :key="marker.id" class="marker-record-row">
+          <span class="pin-icon">📌</span>
+          <div class="marker-record-body">
+            <el-tag type="warning" size="small">参照物</el-tag>
+            <span v-if="markerEditId !== marker.id" class="marker-text">
+              {{ marker.content || '（无描述）' }}
+            </span>
+            <el-input
+              v-else
+              v-model="markerEditText"
+              type="textarea"
+              :rows="2"
+              size="small"
+              @blur="saveMarkerDesc(marker.id)"
+            />
+            <el-text type="info" size="small">{{ formatTime(marker.timestamp) }}</el-text>
+          </div>
+          <div class="marker-btns">
+            <el-button size="small" text type="primary" @click="startEditMarker(marker)">
+              编辑
+            </el-button>
+            <el-button size="small" text type="danger" @click="removeMarker(marker.id)">
               删除
             </el-button>
           </div>
-        </el-card>
+        </div>
       </div>
-    </div>
-
-    <!-- 空状态 -->
-    <el-empty
-      v-if="points.length === 0 && markers.length === 0"
-      description="开始绘制轨迹，记录你的定向日记"
-    />
-
-    <!-- 添加点位按钮 -->
-    <div class="add-point-section" v-if="points.length > 0">
-      <el-button
-        type="primary"
-        size="large"
-        @click="$emit('insert-point-mode', segmentIndex, points.length - 1)"
-        plain
-        style="width: 100%"
-      >
-        <el-icon><Plus /></el-icon>
-        在末尾新增点
-      </el-button>
+      <el-empty v-else description="暂无参照物" :image-size="48" />
     </div>
   </el-card>
 </template>
 
 <script lang="ts">
 import { defineComponent, ref, computed, watch } from 'vue'
-import { Document, Download, Location, Star, Plus, ArrowDown, Files } from '@element-plus/icons-vue'
+import {
+  Download,
+  Location,
+  Plus,
+  ArrowDown,
+  List,
+  LocationFilled,
+  DataAnalysis
+} from '@element-plus/icons-vue'
 import type { Point, Marker, Segment } from '../types'
 import { PDFExporter, defaultPDFConfig, defaultProjectConfig } from '../utils/pdfExport'
+import { calculateDistance } from '../utils/distance'
+import { formatDistance, getA4CanvasSize, segmentPixelLength } from '../utils/mapScale'
+import type { PaperOrientation } from '../utils/mapScale'
+import { buildSegmentGroupCompare, formatLength } from '../utils/segment'
 
 export default defineComponent({
   name: 'DiaryList',
   components: {
-    Document,
     Download,
     Location,
-    Star,
     Plus,
     ArrowDown,
-    Files
+    List,
+    LocationFilled,
+    DataAnalysis
   },
   props: {
     segment: { type: Object as () => Segment, required: true },
-    scale: { type: Number, required: true },
+    scaleEnabled: { type: Boolean, required: true },
+    mapScaleDenominator: { type: Number, required: true },
+    orientation: { type: String as () => PaperOrientation, required: true },
     segmentIndex: { type: Number, required: true },
     allSegments: { type: Array as () => Segment[], required: true },
-    canvasElement: { type: Object as () => HTMLCanvasElement | null, required: true }
+    canvasElement: { type: Object as () => HTMLCanvasElement | null, required: true },
+    landmarkMode: { type: Boolean, required: true },
+    landmarkSize: { type: Number, required: true },
+    drawing: { type: Boolean, required: true }
   },
   emits: [
     'remove-point',
     'insert-point-mode',
     'edit-point-mode',
     'toggle-type',
-    'update-segment-description',
     'update-point-description',
-    'remove-marker'
+    'update-marker-description',
+    'remove-marker',
+    'toggle-landmark-mode'
   ],
   setup(props, { emit }) {
-    const segmentDescription = ref(props.segment.description || '')
+    const descOpenIndex = ref<number | null>(null)
+    const markerEditId = ref<string | null>(null)
+    const markerEditText = ref('')
 
     const points = computed(() => props.segment.points || [])
     const markers = computed(() => props.segment.markers || [])
+    const a4Canvas = computed(() => getA4CanvasSize(props.orientation))
 
-    const getDistance = (a: Point, b: Point) => {
-      const dx = a.x - b.x
-      const dy = a.y - b.y
-      return Math.sqrt(dx * dx + dy * dy)
+    const groupCompare = computed(() =>
+      buildSegmentGroupCompare(
+        props.allSegments,
+        props.segment.groupId,
+        props.mapScaleDenominator,
+        a4Canvas.value,
+        props.scaleEnabled
+      )
+    )
+
+    const formatPointDistance = (a: Point, b: Point) => {
+      const px = calculateDistance(a, b)
+      const f = formatDistance(px, props.scaleEnabled, props.mapScaleDenominator, a4Canvas.value)
+      return `${f.value} ${f.unit}`
     }
 
-    const getMarkerTypeColor = (type: string) => {
-      const colors = {
-        note: 'info',
-        photo: 'success',
-        warning: 'danger',
-        checkpoint: 'warning',
-        milestone: 'primary'
-      }
-      return colors[type as keyof typeof colors] || 'info'
+    const currentSegmentLengthText = computed(() => {
+      const px = segmentPixelLength(points.value)
+      const f = formatDistance(px, props.scaleEnabled, props.mapScaleDenominator, a4Canvas.value)
+      return `${f.value} ${f.unit}`
+    })
+
+    const formatLen = (meters: number) => {
+      const f = formatLength(meters, props.scaleEnabled)
+      return `${f.value} ${f.unit}`
     }
 
-    const getMarkerTypeText = (type: string) => {
-      const texts = {
-        note: '备注',
-        photo: '照片',
-        warning: '警告',
-        checkpoint: '检查点',
-        milestone: '里程碑'
-      }
-      return texts[type as keyof typeof texts] || '标记'
+    const diffPercent = (compareM: number, actualM: number) => {
+      if (actualM <= 0) return '—'
+      const diff = ((compareM - actualM) / actualM) * 100
+      const sign = diff > 0 ? '+' : ''
+      return `${sign}${diff.toFixed(1)}%`
     }
 
-    const formatTime = (timestamp: Date) => {
-      return new Date(timestamp).toLocaleTimeString('zh-CN', {
-        hour: '2-digit',
-        minute: '2-digit'
-      })
+    const toggleDesc = (index: number) => {
+      descOpenIndex.value = descOpenIndex.value === index ? null : index
     }
 
-    const updateSegmentDescription = () => {
-      emit('update-segment-description', props.segmentIndex, segmentDescription.value)
+    const onPointMore = (cmd: string, index: number) => {
+      if (cmd === 'insert') emit('insert-point-mode', props.segmentIndex, index)
+      if (cmd === 'toggle-type') emit('toggle-type', props.segmentIndex, index)
     }
 
     const updatePointDescription = (index: number) => {
-      emit('update-point-description', props.segmentIndex, index, points.value[index].description)
+      emit(
+        'update-point-description',
+        props.segmentIndex,
+        index,
+        points.value[index].description || ''
+      )
     }
+
+    const startEditMarker = (marker: Marker) => {
+      markerEditId.value = marker.id
+      markerEditText.value = marker.content || ''
+    }
+
+    const saveMarkerDesc = (markerId: string) => {
+      emit('update-marker-description', props.segmentIndex, markerId, markerEditText.value)
+      markerEditId.value = null
+    }
+
+    const formatTime = (timestamp: Date) =>
+      new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 
     const removeMarker = (markerId: string) => {
       emit('remove-marker', props.segmentIndex, markerId)
     }
 
-    const exportPDF = async () => {
-      try {
-        const projectConfig = {
-          ...defaultProjectConfig,
-          scale: props.scale,
-          title: '我的定向运动轨迹日记'
-        }
-
-        const pdfConfig = {
+    const exportSegments = async (list: Segment[]) => {
+      const exporter = new PDFExporter(
+        {
           ...defaultPDFConfig,
           includeMap: true,
           includePoints: true,
           includeMarkers: true,
           includeDescriptions: true
-        }
-
-        const exporter = new PDFExporter(pdfConfig, projectConfig)
-
-        if (props.canvasElement) {
-          await exporter.exportPDF(props.allSegments, props.canvasElement)
-        } else {
-          console.error('画布元素未找到')
-        }
-      } catch (error) {
-        console.error('PDF导出失败:', error)
-        // 这里可以添加错误提示
-      }
-    }
-
-    const exportAllSegments = async () => {
-      try {
-        const projectConfig = {
-          ...defaultProjectConfig,
-          scale: props.scale,
-          title: '我的定向运动完整轨迹日记'
-        }
-
-        const pdfConfig = {
-          ...defaultPDFConfig,
-          includeMap: true,
-          includePoints: true,
-          includeMarkers: true,
-          includeDescriptions: true
-        }
-
-        const exporter = new PDFExporter(pdfConfig, projectConfig)
-
-        if (props.canvasElement) {
-          // 传递所有分段数据
-          await exporter.exportPDF(props.allSegments || [props.segment], props.canvasElement)
-        } else {
-          console.error('画布元素未找到')
-        }
-      } catch (error) {
-        console.error('PDF导出失败:', error)
-      }
+        },
+        { ...defaultProjectConfig, scale: props.mapScaleDenominator, title: '定向轨迹记录' }
+      )
+      if (props.canvasElement) await exporter.exportPDF(list, props.canvasElement)
     }
 
     const handleExportCommand = async (command: string) => {
-      if (command === 'current-segment') {
-        await exportPDF()
-      } else if (command === 'all-segments') {
-        await exportAllSegments()
-      }
+      if (command === 'current-segment') await exportSegments([props.segment])
+      else if (command === 'all-segments') await exportSegments(props.allSegments || [props.segment])
     }
 
-    // 监听segment变化
     watch(
-      () => props.segment.description,
-      newDesc => {
-        segmentDescription.value = newDesc || ''
+      () => props.segmentIndex,
+      () => {
+        descOpenIndex.value = null
+        markerEditId.value = null
       }
     )
 
     return {
       points,
       markers,
-      segmentDescription,
-      getDistance,
-      getMarkerTypeColor,
-      getMarkerTypeText,
-      formatTime,
-      updateSegmentDescription,
+      descOpenIndex,
+      markerEditId,
+      markerEditText,
+      groupCompare,
+      formatPointDistance,
+      currentSegmentLengthText,
+      formatLen,
+      diffPercent,
+      toggleDesc,
+      onPointMore,
       updatePointDescription,
+      startEditMarker,
+      saveMarkerDesc,
+      formatTime,
       removeMarker,
-      exportPDF,
       handleExportCommand
     }
   }
@@ -342,13 +409,11 @@ export default defineComponent({
   margin: 0 auto;
   max-width: 700px;
   border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(64, 158, 255, 0.08);
-
   .el-card__header {
     font-weight: bold;
-    font-size: 16px;
+    font-size: 15px;
     background: #f5f7fa;
-    border-radius: 12px 12px 0 0;
+    padding: 10px 14px;
   }
 }
 
@@ -356,101 +421,143 @@ export default defineComponent({
   display: flex;
   align-items: center;
   justify-content: space-between;
-
-  .export-btn {
-    margin-left: auto;
-  }
 }
 
-.segment-description {
-  margin-bottom: 20px;
+.finished-tip {
+  margin-bottom: 10px;
+}
 
-  .el-textarea {
-    border-radius: 8px;
-  }
+.role-tag {
+  margin-bottom: 10px;
+}
+
+.group-compare-box {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: #f5f9ff;
+  border: 1px solid #d9ecff;
+  border-radius: 8px;
+}
+
+.compare-actual,
+.compare-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .section-title {
   display: flex;
   align-items: center;
-  margin: 20px 0 12px 0;
+  margin: 12px 0 8px;
   color: #409eff;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
-
   .el-icon {
     margin-right: 6px;
   }
 }
 
-.point-card {
+.segment-route-length {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #ecf5ff;
   border-radius: 8px;
-  margin-bottom: 8px;
+}
 
-  .point-info {
-    margin-bottom: 12px;
-  }
+.point-records {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
-  .point-coords {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
+.point-record-row {
+  padding: 8px 10px;
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
 
-  .point-distance {
-    margin-bottom: 8px;
+  &.is-finished-route {
+    opacity: 0.92;
+    background: #f5f7fa;
   }
+}
 
-  .point-description {
-    .el-textarea {
-      border-radius: 6px;
-    }
-  }
+.point-record-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
 
-  .point-actions {
-    display: flex;
-    justify-content: flex-end;
-  }
+.point-record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.point-desc-input {
+  margin-top: 8px;
+}
+
+.append-point-btn {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.marker-action-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
 .markers-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 
-.marker-card {
+.marker-record-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #fffbf0;
+  border: 1px solid #faecd8;
   border-radius: 8px;
-
-  .marker-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .marker-content {
-    color: #606266;
-    line-height: 1.5;
-    margin-bottom: 12px;
-  }
-
-  .marker-actions {
-    display: flex;
-    justify-content: flex-end;
-  }
 }
 
-.add-point-section {
-  margin-top: 20px;
+.pin-icon {
+  font-size: 18px;
 }
 
-.el-timeline {
-  padding-left: 0;
+.marker-record-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
 
-  .el-timeline-item {
-    padding-bottom: 20px;
-  }
+.marker-text {
+  font-size: 13px;
+  color: #606266;
+  word-break: break-all;
+}
+
+.marker-btns {
+  display: flex;
+  flex-direction: column;
 }
 </style>
- 
