@@ -2,6 +2,7 @@
   "name": "canvas-distance-app",
   "version": "1.0.0",
   "description": "A Vue.js application for calculating distances on a canvas.",
+  "type": "module",
   "main": "src/main.js",
   "scripts": {
     "dev": "vite",

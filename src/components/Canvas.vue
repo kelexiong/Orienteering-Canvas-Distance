@@ -1,12 +1,16 @@
 <template>
   <el-card class="canvas-card" shadow="hover">
-    <div class="canvas-container">
+    <div ref="canvasContainer" class="canvas-container">
       <canvas
         ref="canvas"
         :width="width"
         :height="height"
         class="canvas-main"
-        :style="{ aspectRatio: `${width} / ${height}` }"
+        :style="{
+          aspectRatio: `${width} / ${height}`,
+          width: canvasDisplaySize.width ? `${canvasDisplaySize.width}px` : '100%',
+          height: canvasDisplaySize.height ? `${canvasDisplaySize.height}px` : 'auto'
+        }"
         @click="handleCanvasClick"
         @contextmenu="handleCanvasRightClick"
         @mousedown="onMouseDown"
@@ -118,9 +122,12 @@ export default defineComponent({
     pointSizeNuber: { type: Number, required: true },
     landmarkSizeNuber: { type: Number, required: true },
     LineWidthNuber: { type: Number, required: true },
+    arrowSizeNuber: { type: Number, default: 1 },
+    markerOpacity: { type: Number, default: 0.7 },
     drawing: { type: Boolean, required: true },
     landmarkMode: { type: Boolean, default: false },
     imageSrc: { type: [String, null], required: true },
+    imageRotation: { type: Number, default: 0 },
     orientation: { type: String, required: true },
     drawMode: { type: String, required: true },
     width: { type: Number, required: true },
@@ -129,15 +136,41 @@ export default defineComponent({
   emits: ['add-point', 'add-marker'],
   setup(props, { emit }) {
     const canvas = ref<HTMLCanvasElement | null>(null)
+    const canvasContainer = ref<HTMLElement | null>(null)
+    const canvasDisplaySize = ref({ width: 0, height: 0 })
     const isLoading = ref(false)
     const errorMessage = ref('')
     const viewScale = ref(1)
     const offset = ref({ x: 0, y: 0 }) // 以“canvas内部坐标(屏幕像素等价)”为单位的平移
     const viewScaleMin = 0.2
-    const viewScaleMax = 6
+    const viewScaleMax = 10
+    let resizeObserver: ResizeObserver | null = null
 
     function clamp(n: number, min: number, max: number) {
       return Math.min(max, Math.max(min, n))
+    }
+
+    function updateCanvasDisplaySize() {
+      const container = canvasContainer.value
+      if (!container) return
+
+      const rect = container.getBoundingClientRect()
+      if (!rect.width || !rect.height) return
+
+      const aspectRatio = props.width / props.height
+      let displayHeight = rect.height
+      let displayWidth = displayHeight * aspectRatio
+
+      if (displayWidth > rect.width) {
+        displayWidth = rect.width
+        displayHeight = displayWidth / aspectRatio
+      }
+
+      canvasDisplaySize.value = {
+        width: Math.floor(displayWidth),
+        height: Math.floor(displayHeight)
+      }
+      drawAll()
     }
 
     function getCanvasMetrics() {
@@ -164,8 +197,10 @@ export default defineComponent({
       targetW: number,
       targetH: number
     ): { dx: number; dy: number; dw: number; dh: number } {
-      const iw = img.naturalWidth || img.width
-      const ih = img.naturalHeight || img.height
+      const rot = props.imageRotation || 0
+      const swapped = rot === 90 || rot === 270
+      const iw = swapped ? img.naturalHeight || img.height : img.naturalWidth || img.width
+      const ih = swapped ? img.naturalWidth || img.width : img.naturalHeight || img.height
       if (!iw || !ih) return { dx: 0, dy: 0, dw: targetW, dh: targetH }
       const s = Math.min(targetW / iw, targetH / ih)
       const dw = iw * s
@@ -176,6 +211,31 @@ export default defineComponent({
         dw,
         dh
       }
+    }
+
+    function drawRotatedImage(
+      ctx: CanvasRenderingContext2D,
+      img: HTMLImageElement,
+      dx: number,
+      dy: number,
+      dw: number,
+      dh: number
+    ) {
+      const rot = props.imageRotation || 0
+      if (rot === 0) {
+        ctx.drawImage(img, dx, dy, dw, dh)
+        return
+      }
+      const cx = dx + dw / 2
+      const cy = dy + dh / 2
+      ctx.save()
+      ctx.translate(cx, cy)
+      ctx.rotate((rot * Math.PI) / 180)
+      const swapped = rot === 90 || rot === 270
+      const drawW = swapped ? dh : dw
+      const drawH = swapped ? dw : dh
+      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH)
+      ctx.restore()
     }
 
     let dragging = false
@@ -248,12 +308,12 @@ export default defineComponent({
     }
 
     function confirmAddMarker() {
-      if (markerForm.value.type && markerForm.value.content) {
+      if (markerForm.value.type) {
         emit('add-marker', {
           x: currentMarkerPosition.x,
           y: currentMarkerPosition.y,
           type: markerForm.value.type,
-          content: markerForm.value.content
+          content: markerForm.value.content || ''
         })
         markerDialogVisible.value = false
       }
@@ -300,7 +360,7 @@ export default defineComponent({
         errorMessage.value = ''
         img.onload = () => {
           const { dx, dy, dw, dh } = getImageContainRect(img, props.width, props.height)
-          ctx.drawImage(img, dx, dy, dw, dh)
+          drawRotatedImage(ctx, img, dx, dy, dw, dh)
           drawPointsAndLines(ctx)
           isLoading.value = false
         }
@@ -310,7 +370,7 @@ export default defineComponent({
         }
         if (img.complete) {
           const { dx, dy, dw, dh } = getImageContainRect(img, props.width, props.height)
-          ctx.drawImage(img, dx, dy, dw, dh)
+          drawRotatedImage(ctx, img, dx, dy, dw, dh)
           drawPointsAndLines(ctx)
           isLoading.value = false
         }
@@ -404,7 +464,11 @@ export default defineComponent({
     }
 
     // 导出用：在未缩放未平移坐标系下绘制单分段，避免分段互相覆盖
-    function drawSingleSegmentForExport(ctx: CanvasRenderingContext2D, segment: Segment, segIdx: number) {
+    function drawSingleSegmentForExport(
+      ctx: CanvasRenderingContext2D,
+      segment: Segment,
+      segIdx: number
+    ) {
       const seg = segment.points || []
       if (seg.length > 0) {
         ctx.save()
@@ -531,7 +595,7 @@ export default defineComponent({
         }).catch(() => undefined)
         if (img.complete) {
           const { dx, dy, dw, dh } = getImageContainRect(img, props.width, props.height)
-          ctx.drawImage(img, dx, dy, dw, dh)
+          drawRotatedImage(ctx, img, dx, dy, dw, dh)
         }
       }
 
@@ -547,30 +611,24 @@ export default defineComponent({
       color: string,
       scale = 1 / viewScale.value
     ) {
-      const arrowLen = 28 * scale
-      const headLen = 10 * scale
-      const headW = 7 * scale
+      const sz = props.arrowSizeNuber || 1
+      const len = 10 * scale * sz
+      const halfW = 5 * scale * sz
       const ux = Math.cos(angle)
       const uy = Math.sin(angle)
-      const startX = x - ux * arrowLen * 0.35
-      const startY = y - uy * arrowLen * 0.35
-      const endX = x + ux * arrowLen * 0.65
-      const endY = y + uy * arrowLen * 0.65
-
-      ctx.save()
-      ctx.strokeStyle = color
-      ctx.fillStyle = color
-      ctx.lineWidth = Math.max(2 * scale, 1.5)
-      ctx.beginPath()
-      ctx.moveTo(startX, startY)
-      ctx.lineTo(endX, endY)
-      ctx.stroke()
       const px = -uy
       const py = ux
+      const tipX = x + ux * len * 0.5
+      const tipY = y + uy * len * 0.5
+      const baseX = x - ux * len * 0.5
+      const baseY = y - uy * len * 0.5
+
+      ctx.save()
+      ctx.fillStyle = color
       ctx.beginPath()
-      ctx.moveTo(endX, endY)
-      ctx.lineTo(endX - ux * headLen + px * headW, endY - uy * headLen + py * headW)
-      ctx.lineTo(endX - ux * headLen - px * headW, endY - uy * headLen - py * headW)
+      ctx.moveTo(tipX, tipY)
+      ctx.lineTo(baseX + px * halfW, baseY + py * halfW)
+      ctx.lineTo(baseX - px * halfW, baseY - py * halfW)
       ctx.closePath()
       ctx.fill()
       ctx.restore()
@@ -645,8 +703,12 @@ export default defineComponent({
       ctx.save()
       ctx.setTransform(1, 0, 0, 1, 0, 0)
 
+      let pinTopY = sy
       if (marker.type === 'landmark') {
         drawPinAt(ctx, sx, sy, color, props.landmarkSizeNuber)
+        const r = props.landmarkSizeNuber * 0.4
+        const pinHeight = r * 2.2
+        pinTopY = sy - pinHeight - r
       } else {
         ctx.beginPath()
         ctx.arc(sx, sy, props.pointSizeNuber, 0, 2 * Math.PI)
@@ -668,8 +730,65 @@ export default defineComponent({
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(icon, sx, sy)
+        pinTopY = sy - props.pointSizeNuber
+      }
+
+      if (marker.content) {
+        drawMarkerLabel(ctx, sx, pinTopY, marker.content, color)
       }
       ctx.restore()
+    }
+
+    function drawMarkerLabel(
+      ctx: CanvasRenderingContext2D,
+      cx: number,
+      bottomY: number,
+      text: string,
+      color: string
+    ) {
+      const opacity = props.markerOpacity
+      const fontSize = 12
+      const padX = 6
+      const padY = 4
+      const gap = 6
+      ctx.save()
+      ctx.font = `${fontSize}px Arial`
+      const metrics = ctx.measureText(text)
+      const w = metrics.width + padX * 2
+      const h = fontSize + padY * 2
+      const x = cx - w / 2
+      const y = bottomY - gap - h
+      ctx.globalAlpha = opacity
+      ctx.fillStyle = color
+      roundRect(ctx, x, y, w, h, 4)
+      ctx.fill()
+      ctx.globalAlpha = Math.min(1, opacity + 0.2)
+      ctx.fillStyle = '#fff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(text, cx, y + h / 2)
+      ctx.restore()
+    }
+
+    function roundRect(
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      r: number
+    ) {
+      ctx.beginPath()
+      ctx.moveTo(x + r, y)
+      ctx.lineTo(x + w - r, y)
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+      ctx.lineTo(x + w, y + h - r)
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+      ctx.lineTo(x + r, y + h)
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+      ctx.lineTo(x, y + r)
+      ctx.quadraticCurveTo(x, y, x + r, y)
+      ctx.closePath()
     }
 
     function drawPinAt(
@@ -679,26 +798,31 @@ export default defineComponent({
       color: string,
       size: number
     ) {
-      const r = size * 0.45
+      const r = size * 0.4
+      const pinHeight = r * 2.2
+      ctx.save()
       ctx.fillStyle = color
       ctx.strokeStyle = '#fff'
       ctx.lineWidth = 2
       ctx.beginPath()
-      ctx.arc(x, y - r * 0.3, r, 0, Math.PI * 2)
+      ctx.moveTo(x, y)
+      ctx.bezierCurveTo(
+        x - r * 0.8,
+        y - r * 1.2,
+        x - r,
+        y - pinHeight + r * 0.3,
+        x,
+        y - pinHeight + r
+      )
+      ctx.arc(x, y - pinHeight + r, r, Math.PI, 0, false)
+      ctx.bezierCurveTo(x + r, y - pinHeight + r * 0.3, x + r * 0.8, y - r * 1.2, x, y)
       ctx.fill()
       ctx.stroke()
       ctx.beginPath()
-      ctx.moveTo(x, y + r * 0.5)
-      ctx.lineTo(x - r * 0.55, y - r * 0.1)
-      ctx.lineTo(x + r * 0.55, y - r * 0.1)
-      ctx.closePath()
-      ctx.fill()
-      ctx.stroke()
+      ctx.arc(x, y - pinHeight + r, r * 0.35, 0, Math.PI * 2)
       ctx.fillStyle = '#fff'
-      ctx.font = `bold ${Math.max(10, r)}px Arial`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText('📌', x, y - r * 0.35)
+      ctx.fill()
+      ctx.restore()
     }
 
     function drawAll() {
@@ -892,11 +1016,11 @@ export default defineComponent({
 
     watch(
       () => props.width,
-      () => nextTick(drawAll)
+      () => nextTick(updateCanvasDisplaySize)
     )
     watch(
       () => props.height,
-      () => nextTick(drawAll)
+      () => nextTick(updateCanvasDisplaySize)
     )
     watch(
       () => props.segments,
@@ -911,11 +1035,22 @@ export default defineComponent({
       () => props.imageSrc,
       () => nextTick(drawAll)
     )
+    watch(
+      () => props.imageRotation,
+      () => nextTick(drawAll)
+    )
     watch(viewScale, () => nextTick(drawAll))
     watch(offset, () => nextTick(drawAll))
 
     onMounted(() => {
-      drawAll()
+      nextTick(updateCanvasDisplaySize)
+
+      if (canvasContainer.value) {
+        resizeObserver = new ResizeObserver(() => {
+          updateCanvasDisplaySize()
+        })
+        resizeObserver.observe(canvasContainer.value)
+      }
 
       // 添加全局鼠标事件监听器，确保拖拽功能正常工作
       document.addEventListener('mousemove', onMouseMove)
@@ -923,13 +1058,17 @@ export default defineComponent({
     })
 
     onUnmounted(() => {
-      // 清理全局事件监听器
+      // 清理全局鼠标和容器尺寸监听器
       document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', onMouseUp)
+      resizeObserver?.disconnect()
+      resizeObserver = null
     })
 
     return {
       canvas,
+      canvasContainer,
+      canvasDisplaySize,
       isLoading,
       errorMessage,
       handleCanvasClick,
@@ -963,6 +1102,16 @@ export default defineComponent({
   margin: 0 auto;
   border-radius: 16px;
   box-shadow: 0 4px 24px rgba(64, 158, 255, 0.1);
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  :deep(.el-card__body) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    padding: 12px;
+  }
   .el-card__footer {
     padding: 8px 16px 0 16px;
     background: transparent;
@@ -971,31 +1120,40 @@ export default defineComponent({
 }
 .canvas-container {
   width: 100%;
-  min-height: 220px;
+  flex: 1;
+  min-height: 0;
   position: relative;
-  background: #f6f8fa;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  background:
+    linear-gradient(rgba(64, 158, 255, 0.04), rgba(64, 158, 255, 0.04)),
+    #f6f8fa;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(64, 158, 255, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 .canvas-main {
   display: block;
   background: #fff;
-  border: 2px solid #409eff;
-  border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.08);
-  width: 100%;
-  height: auto;
+  border: 1px solid rgba(64, 158, 255, 0.45);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 4px rgba(64, 158, 255, 0.08),
+    0 8px 24px rgba(64, 158, 255, 0.16);
   max-width: 100%;
-  max-height: 60vw;
+  max-height: 100%;
   margin: 0 auto;
   touch-action: none;
-  transition: box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   &:hover {
-    box-shadow: 0 4px 16px rgba(64, 158, 255, 0.16);
+    border-color: #409eff;
+    box-shadow:
+      0 0 0 5px rgba(64, 158, 255, 0.12),
+      0 12px 32px rgba(64, 158, 255, 0.22);
   }
 }
 

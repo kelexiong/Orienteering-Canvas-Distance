@@ -1,12 +1,69 @@
 <template>
   <div class="home-tech-bg">
-    <div class="home-header animate__animated animate__fadeInDown">
-      <el-icon class="logo"><Compass /></el-icon>
-      <span class="title">智能定向绘图系统</span>
-    </div>
-    <el-container class="home-tech-container">
-      <el-aside class="canvas-aside">
-        <!-- <el-card class="canvas-card animate__animated animate__fadeInLeft" shadow="hover"> -->
+    <header class="top-toolbar animate__animated animate__fadeInDown">
+      <div class="brand">
+        <el-icon class="logo"><Compass /></el-icon>
+        <span class="title">定向越野绘图笔记</span>
+      </div>
+      <div class="actions">
+        <el-button
+          :type="drawing ? 'warning' : 'success'"
+          @click="onToggleDrawing"
+          class="tb-btn"
+        >
+          <el-icon><Edit /></el-icon>
+          <span>{{ drawing ? '结束绘制' : '开始绘制' }}</span>
+        </el-button>
+        <el-popconfirm title="确定要清除所有点位吗？" @confirm="clearPoints">
+          <template #reference>
+            <el-button type="danger" class="tb-btn">
+              <el-icon><Delete /></el-icon>
+              <span>清除</span>
+            </el-button>
+          </template>
+        </el-popconfirm>
+        <el-button type="info" class="tb-btn" @click="triggerImageUpload">
+          <el-icon><Picture /></el-icon>
+          <span>插图</span>
+        </el-button>
+        <el-button type="warning" class="tb-btn" @click="rotateImage">
+          <el-icon><Refresh /></el-icon>
+          <span>旋转</span>
+        </el-button>
+        <el-button
+          class="tb-btn"
+          @click="drawMode = drawMode === 'line' ? 'curve' : 'line'"
+        >
+          <el-icon><Connection /></el-icon>
+          <span>{{ drawMode === 'line' ? '曲线' : '直线' }}</span>
+        </el-button>
+        <el-button
+          :type="landmarkMode ? 'primary' : 'default'"
+          class="tb-btn"
+          @click="toggleLandmarkMode"
+        >
+          <el-icon><LocationFilled /></el-icon>
+          <span>{{ landmarkMode ? '图钉中' : '参照物' }}</span>
+        </el-button>
+        <el-button type="primary" plain class="tb-btn" @click="addSegmentGroup">
+          <el-icon><Plus /></el-icon>
+          <span>新增分段</span>
+        </el-button>
+      </div>
+      <div class="toolbar-right">
+        <el-button
+          :type="panelDrawerVisible ? 'primary' : 'default'"
+          class="tb-btn panel-toggle-btn"
+          @click="panelDrawerVisible = !panelDrawerVisible"
+        >
+          <el-icon><Operation /></el-icon>
+          <span>面板</span>
+        </el-button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="canvas-stage">
         <Canvas
           :segments="segments"
           :draw-mode="drawMode"
@@ -17,102 +74,69 @@
           :pointSizeNuber="pointSizeNuber"
           :landmarkSizeNuber="landmarkSizeNuber"
           :LineWidthNuber="LineWidthNuber"
+          :arrowSizeNuber="arrowSizeNuber"
+          :markerOpacity="markerOpacity"
           :drawing="drawing"
           :landmark-mode="landmarkMode"
           :image-src="imageSrc"
           :orientation="orientation"
+          :image-rotation="imageRotation"
           :edit-mode="editMode"
           @add-point="addPoint"
           @add-marker="onAddMarker"
           class="home-canvas"
           ref="canvasRef"
         />
-        <!-- </el-card> -->
-      </el-aside>
-      <el-main class="panel-main">
-        <!-- PC端操作面板 -->
-        <el-card
-          class="panel-card animate__animated animate__fadeInRight"
-          shadow="hover"
-          v-if="!isMobile"
-        >
+      </section>
+
+      <div
+        v-if="isMobile && panelDrawerVisible"
+        class="side-panel-mask"
+        @click="panelDrawerVisible = false"
+      ></div>
+
+      <aside class="side-panel" :class="{ 'is-collapsed': !panelDrawerVisible }">
+        <div class="side-panel-inner">
+          <div class="mobile-panel-header">
+            <span>记录面板</span>
+            <el-button size="small" text type="primary" @click="panelDrawerVisible = false">
+              收起
+            </el-button>
+          </div>
           <ControlPanel
+            hide-actions
             :drawing="drawing"
             :draw-mode="drawMode"
             :orientation="orientation"
             :landmark-mode="landmarkMode"
             :current-segment="currentSegment"
-            :segments="segments"
+            :segment-groups="segmentGroups"
             v-model:scale-enabled="scaleEnabled"
             v-model:map-scale-denominator="mapScaleDenominator"
             :point-size="pointSizeNuber"
             :line-width="LineWidthNuber"
             :landmark-size="landmarkSizeNuber"
-            :segment-groups="segmentGroups"
+            :arrow-size="arrowSizeNuber"
+            :marker-opacity="markerOpacity"
             @toggle-drawing="onToggleDrawing"
             @clear-points="clearPoints"
             @upload-image="triggerImageUpload"
-            @toggle-orientation="toggleOrientation"
+            @toggle-orientation="rotateImage"
             @toggle-draw-mode="drawMode = drawMode === 'line' ? 'curve' : 'line'"
             @toggle-landmark-mode="toggleLandmarkMode"
             @add-compare-route="addCompareRoute"
             @add-segment-group="addSegmentGroup"
             @switch-segment="setCurrentSegment"
             @update-segment-color="updateSegmentColor"
+            @remove-segment="removeSegmentById"
+            @reorder-compares="reorderCompares"
             @update:point-size="pointSizeNuber = $event"
             @update:line-width="LineWidthNuber = $event"
             @update:landmark-size="landmarkSizeNuber = $event"
+            @update:arrow-size="arrowSizeNuber = $event"
+            @update:marker-opacity="markerOpacity = $event"
           />
-        </el-card>
-        <!-- 移动端操作面板Drawer -->
-        <el-drawer
-          v-model="drawerVisible"
-          direction="rtl"
-          size="90vw"
-          :with-header="false"
-          class="panel-drawer animate__animated animate__slideInRight"
-        >
-          <el-card class="panel-card animate__animated animate__fadeInUp" shadow="hover">
-            <ControlPanel
-              :drawing="drawing"
-              :draw-mode="drawMode"
-              :orientation="orientation"
-              :landmark-mode="landmarkMode"
-              :current-segment="currentSegment"
-              :segment-groups="segmentGroups"
-              v-model:scale-enabled="scaleEnabled"
-              v-model:map-scale-denominator="mapScaleDenominator"
-              :point-size="pointSizeNuber"
-              :line-width="LineWidthNuber"
-              :landmark-size="landmarkSizeNuber"
-              @toggle-drawing="onToggleDrawing"
-              @clear-points="clearPoints"
-              @upload-image="triggerImageUpload"
-              @toggle-orientation="toggleOrientation"
-              @toggle-draw-mode="drawMode = drawMode === 'line' ? 'curve' : 'line'"
-              @toggle-landmark-mode="toggleLandmarkMode"
-              @add-compare-route="addCompareRoute"
-              @add-segment-group="addSegmentGroup"
-              @switch-segment="setCurrentSegment"
-              @update-segment-color="updateSegmentColor"
-              @update:point-size="pointSizeNuber = $event"
-              @update:line-width="LineWidthNuber = $event"
-              @update:landmark-size="landmarkSizeNuber = $event"
-            />
-          </el-card>
-        </el-drawer>
-        <!-- 移动端操作按钮 -->
-        <el-button
-          class="drawer-btn animate__animated animate__bounceIn"
-          type="primary"
-          icon="Menu"
-          circle
-          size="large"
-          @click="drawerVisible = !drawerVisible"
-          v-if="isMobile"
-        />
-        <!-- 点位列表 -->
-        <el-card class="pointlist-card animate__animated animate__fadeInUp" shadow="hover">
+          <el-divider class="drawer-divider">点位列表</el-divider>
           <DiaryList
             :segment="segments[currentSegment]"
             :scale-enabled="scaleEnabled"
@@ -133,9 +157,9 @@
             @update-marker-description="updateMarkerDescription"
             @toggle-landmark-mode="toggleLandmarkMode"
           />
-        </el-card>
-      </el-main>
-    </el-container>
+        </div>
+      </aside>
+    </main>
 
     <input
       ref="fileInput"
@@ -144,7 +168,6 @@
       style="display: none"
       @change="onImageChange"
     />
-
   </div>
 </template>
 
@@ -154,7 +177,18 @@ import Canvas from '../components/Canvas.vue'
 import DiaryList from '../components/DiaryList.vue'
 import ControlPanel from '../components/ControlPanel.vue'
 import { ElMessage } from 'element-plus'
-import { Compass, Menu } from '@element-plus/icons-vue'
+import {
+  Compass,
+  Menu,
+  Edit,
+  Delete,
+  Picture,
+  Refresh,
+  Connection,
+  LocationFilled,
+  Plus,
+  Operation
+} from '@element-plus/icons-vue'
 import type { Segment, Point, Marker } from '../types'
 import { MAP_SCALE_PRESETS } from '../utils/mapScale'
 import { createSegment, buildSegmentGroups } from '../utils/segment'
@@ -165,7 +199,15 @@ export default defineComponent({
     DiaryList,
     ControlPanel,
     Compass,
-    Menu
+    Menu,
+    Edit,
+    Delete,
+    Picture,
+    Refresh,
+    Connection,
+    LocationFilled,
+    Plus,
+    Operation
   },
   setup() {
     const drawing = ref(false)
@@ -304,8 +346,7 @@ export default defineComponent({
       segments.value.find(s => s.groupId === groupId && s.trackRole === 'actual' && s.finished)
 
     const addCompareRoute = async (groupId?: string) => {
-      const gid =
-        groupId || segments.value[currentSegment.value]?.groupId
+      const gid = groupId || segments.value[currentSegment.value]?.groupId
       if (!gid) return
       const actual = findFinishedActualInGroup(gid)
       if (!actual) {
@@ -357,6 +398,38 @@ export default defineComponent({
         segments.value[segIdx].color = color
         segments.value[segIdx].updatedAt = new Date()
       }
+    }
+
+    const removeSegmentById = (segId: string) => {
+      const idx = segments.value.findIndex(s => s.id === segId)
+      if (idx === -1) return
+      const seg = segments.value[idx]
+      if (seg.trackRole === 'actual') return
+      segments.value.splice(idx, 1)
+      if (currentSegment.value >= segments.value.length) {
+        currentSegment.value = segments.value.length - 1
+      } else if (currentSegment.value === idx) {
+        const actual = segments.value.find(
+          s => s.groupId === seg.groupId && s.trackRole === 'actual'
+        )
+        currentSegment.value = actual ? segments.value.indexOf(actual) : 0
+      } else if (currentSegment.value > idx) {
+        currentSegment.value--
+      }
+      if (drawing.value) drawing.value = false
+    }
+
+    const reorderCompares = (groupId: string, fromIdx: number, toIdx: number) => {
+      const compares = segments.value
+        .map((s, i) => ({ seg: s, globalIdx: i }))
+        .filter(({ seg }) => seg.groupId === groupId && seg.trackRole === 'compare')
+      if (fromIdx < 0 || fromIdx >= compares.length || toIdx < 0 || toIdx >= compares.length) return
+      const movedGlobalIdx = compares[fromIdx].globalIdx
+      const [moved] = segments.value.splice(movedGlobalIdx, 1)
+      const targetGlobalIdx =
+        fromIdx < toIdx ? compares[toIdx].globalIdx - 1 : compares[toIdx].globalIdx
+      segments.value.splice(targetGlobalIdx, 0, moved)
+      currentSegment.value = segments.value.findIndex(s => s.id === moved.id)
     }
 
     const setCurrentSegment = async (idx: number) => {
@@ -421,6 +494,7 @@ export default defineComponent({
 
     // 自定义Hook管理画布设置
     const orientation = ref<'landscape' | 'portrait'>('landscape')
+    const imageRotation = ref(0)
     const scaleEnabled = ref(false)
     const mapScaleDenominator = ref(10000)
     const mapScalePresets = MAP_SCALE_PRESETS
@@ -428,18 +502,15 @@ export default defineComponent({
     const pointSizeNuber = ref(2)
     const landmarkSizeNuber = ref(10)
     const LineWidthNuber = ref(2)
-    const canvasWidth = computed(() => {
-      return orientation.value === 'landscape' ? 842 : 595
-    })
-
-    const canvasHeight = computed(() => {
-      return orientation.value === 'landscape' ? 595 : 842
-    })
+    const arrowSizeNuber = ref(1)
+    const markerOpacity = ref(0.7)
+    const canvasWidth = computed(() => 842)
+    const canvasHeight = computed(() => 595)
 
     const segmentGroups = computed(() => buildSegmentGroups(segments.value))
 
-    const toggleOrientation = () => {
-      orientation.value = orientation.value === 'landscape' ? 'portrait' : 'landscape'
+    const rotateImage = () => {
+      imageRotation.value = (imageRotation.value + 90) % 360
     }
 
     // 监听模式变化，动态修改 body 的 cursor
@@ -493,17 +564,9 @@ export default defineComponent({
       landmarkMode.value = false
     }
 
-    // 横屏检测与自动横屏
+    // 移动端按竖屏正常使用，不再尝试强制横屏
     function checkOrientation() {
-      if (window.innerWidth < window.innerHeight) {
-        showLandscapeTip.value = true
-        // 尝试自动横屏
-        if (screen.orientation && (screen.orientation as any).lock) {
-          ;(screen.orientation as any).lock('landscape').catch(() => {})
-        }
-      } else {
-        showLandscapeTip.value = false
-      }
+      showLandscapeTip.value = false
     }
     onMounted(() => {
       checkOrientation()
@@ -513,11 +576,17 @@ export default defineComponent({
       window.removeEventListener('resize', checkOrientation)
     })
 
-    const drawerVisible = ref(false)
+    const panelDrawerVisible = ref(true)
     const isMobile = ref(false)
     // 响应式判断
     const checkMobile = () => {
-      isMobile.value = window.innerWidth <= 768
+      const nextIsMobile = window.innerWidth <= 768
+      if (nextIsMobile && !isMobile.value) {
+        panelDrawerVisible.value = false
+      } else if (!nextIsMobile && isMobile.value) {
+        panelDrawerVisible.value = true
+      }
+      isMobile.value = nextIsMobile
     }
     onMounted(() => {
       checkMobile()
@@ -574,6 +643,8 @@ export default defineComponent({
       addSegmentGroup,
       updateSegmentColor,
       updateMarkerDescription,
+      removeSegmentById,
+      reorderCompares,
       onToggleDrawing,
       toggleLandmarkMode,
       onAddMarker,
@@ -596,6 +667,8 @@ export default defineComponent({
       },
       pointSizeNuber,
       LineWidthNuber,
+      arrowSizeNuber,
+      markerOpacity,
       drawing,
       imageSrc,
       clearPoints,
@@ -603,7 +676,8 @@ export default defineComponent({
       addPoint,
       fileInput,
       orientation,
-      toggleOrientation,
+      imageRotation,
+      rotateImage,
       onInsertPointMode: (segIdx: number, ptIdx: number) => {
         resumeSegmentEditing(segIdx)
         insertMode.value = { segIdx, ptIdx: ptIdx + 1 }
@@ -622,7 +696,7 @@ export default defineComponent({
       DiaryList,
       setCurrentSegment,
       showLandscapeTip,
-      drawerVisible,
+      panelDrawerVisible,
       isMobile,
       togglePointType,
       updateSegmentDescription,
@@ -645,163 +719,251 @@ export default defineComponent({
   padding: 0;
 }
 .home-tech-bg {
-  min-height: 100vh;
+  height: 100vh;
   width: 100%;
   background: linear-gradient(135deg, #0f2027 0%, #2c5364 100%);
-  padding: 0;
-}
-.home-header {
-  display: flex;
-  align-items: center;
-  padding: 32px 0 16px 0;
-  justify-content: center;
-  .logo {
-    font-size: 2.5rem;
-    color: #409eff;
-    margin-right: 12px;
-    filter: drop-shadow(0 2px 8px #409eff88);
-  }
-  .title {
-    font-size: 2rem;
-    color: #fff;
-    font-weight: bold;
-    letter-spacing: 2px;
-    text-shadow: 0 2px 8px #409eff44;
-  }
-}
-.home-tech-container {
-  display: flex;
-  flex-direction: row;
-  justify-content: center;
-  align-items: flex-start;
-  min-height: calc(100vh - 120px);
-  margin: 0 0.8rem;
-  border-radius: 18px;
-  box-shadow: 0 8px 32px rgba(64, 158, 255, 0.18);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 20px;
-}
-.canvas-aside {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-}
-.canvas-card {
-  border-radius: 18px;
-  box-shadow: 0 4px 24px #409eff22;
-  border: 2px solid #409eff44;
-  background: #fff;
-  padding: 18px 12px;
-  width: 100%;
-  // max-width: 800px;
-}
-.panel-main {
-  flex: 1;
-  flex-shrink: 0;
-  padding: 32px 32px 32px 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  // max-height: calc(100vh - 200px);
-  overflow-y: auto;
+  overflow: hidden;
 }
-.panel-card {
-  border-radius: 16px;
-  box-shadow: 0 2px 12px #409eff22;
-  background: #f7fbff;
-  margin-bottom: 18px;
-  padding: 14px 12px;
-}
-.pointlist-card {
-  border-radius: 16px;
-  box-shadow: 0 2px 12px #409eff22;
-  background: #fff;
-  margin-bottom: 18px;
-  padding: 12px 10px;
-  min-height: 280px;
-  max-height: min(55vh, 520px);
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.drawer-btn {
-  position: fixed;
-  bottom: 32px;
-  right: 32px;
-  z-index: 9999;
-  box-shadow: 0 2px 8px #409eff44;
-}
-.panel-drawer {
-  background: #f7fbff;
-}
-@media (max-width: 1400px) {
-  .home-tech-container {
-    max-width: 100vw;
-  }
-  .canvas-aside {
-    max-width: 100vw;
-    min-width: 0;
-    padding-left: 8px;
-  }
-  .panel-main {
-    width: 340px;
-    min-width: 300px;
-    padding-right: 8px;
-  }
-}
-@media (max-width: 900px) {
-  .home-tech-container {
-    flex-direction: column !important;
-    max-width: 100%;
-    border-radius: 0;
-    box-shadow: none;
-    min-height: auto;
-    margin: 0;
-    padding: 10px;
-  }
-  .canvas-aside,
-  .panel-main {
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: 100% !important;
-    padding: 10px !important;
-  }
-  .panel-main {
-    max-height: none;
-    overflow-y: visible;
-  }
-}
-@media (max-width: 768px) {
-  .home-header {
-    padding: 18px 0 8px 0;
+
+.top-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: rgba(15, 32, 39, 0.85);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(64, 158, 255, 0.25);
+  box-shadow: 0 2px 12px rgba(64, 158, 255, 0.15);
+  flex-shrink: 0;
+  z-index: 10;
+
+  .brand {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
     .logo {
-      font-size: 2rem;
+      font-size: 1.5rem;
+      color: #409eff;
+      margin-right: 8px;
+      filter: drop-shadow(0 2px 6px #409eff88);
     }
     .title {
-      font-size: 1.2rem;
+      font-size: 1.1rem;
+      color: #fff;
+      font-weight: 600;
+      letter-spacing: 1px;
+      white-space: nowrap;
     }
   }
-  .canvas-card {
-    padding: 8px 2px;
-    border-radius: 12px;
-    max-width: 100vw;
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    flex-wrap: wrap;
+    overflow: hidden;
   }
-  .panel-main {
-    min-width: 0;
-    max-width: 100vw;
-    padding: 0;
-    gap: 12px;
+
+  .toolbar-right {
+    flex-shrink: 0;
   }
-  .panel-card,
-  .pointlist-card {
-    border-radius: 12px;
-    margin-bottom: 10px;
-    padding: 10px 4px;
+
+  .tb-btn {
+    height: 32px;
+    padding: 6px 10px;
+    font-size: 12px;
+    span {
+      margin-left: 4px;
+    }
   }
-  .drawer-btn {
-    bottom: 18px;
-    right: 18px;
+
+  .panel-toggle-btn {
+    height: 32px;
+  }
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  position: relative;
+}
+
+.canvas-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 6px;
+  transition: flex 0.3s ease;
+}
+
+.home-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.side-panel-mask {
+  display: none;
+}
+
+.side-panel {
+  width: 360px;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition:
+    width 0.3s ease,
+    opacity 0.25s ease,
+    transform 0.25s ease;
+  border-left: 1px solid rgba(64, 158, 255, 0.2);
+  background: #f7fbff;
+
+  &.is-collapsed {
+    width: 0;
+    opacity: 0;
+    border-left: none;
+  }
+}
+
+.side-panel-inner {
+  width: 360px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.mobile-panel-header {
+  display: none;
+}
+
+:deep(.diary-card) {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.drawer-divider {
+  margin: 14px 0 10px 0;
+  :deep(.el-divider__text) {
+    font-size: 12px;
+    font-weight: 600;
+    color: #606266;
+    background: #f7fbff;
+  }
+}
+
+@media (max-width: 1200px) {
+  .top-toolbar {
+    .brand .title {
+      display: none;
+    }
+    .tb-btn {
+      padding: 6px 8px;
+      span {
+        display: none;
+      }
+    }
+    .panel-toggle-btn span {
+      display: inline;
+    }
+  }
+  .side-panel {
+    width: 300px;
+  }
+  .side-panel-inner {
+    width: 300px;
+  }
+}
+
+@media (max-width: 768px) {
+  .home-tech-bg {
+    height: 100dvh;
+  }
+
+  .top-toolbar {
+    padding: 6px 8px;
+    gap: 8px;
+    .brand .logo {
+      font-size: 1.3rem;
+      margin-right: 0;
+    }
+    .actions {
+      gap: 4px;
+    }
+    .tb-btn {
+      height: 30px;
+      padding: 4px 6px;
+    }
+  }
+
+  .canvas-stage {
+    padding: 4px;
+  }
+
+  .side-panel-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(0, 0, 0, 0.28);
+  }
+
+  .side-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(92vw, 420px);
+    z-index: 100;
+    border-left: 1px solid rgba(64, 158, 255, 0.25);
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+    transform: translateX(0);
+
+    &.is-collapsed {
+      width: min(92vw, 420px);
+      opacity: 0;
+      border-left: none;
+      transform: translateX(100%);
+      pointer-events: none;
+    }
+  }
+
+  .side-panel-inner {
+    width: min(92vw, 420px);
+    height: 100dvh;
+    padding: 10px;
+    padding-top: calc(10px + env(safe-area-inset-top));
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-panel-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: -10px -10px 10px;
+    padding: 10px;
+    background: #f7fbff;
+    border-bottom: 1px solid rgba(64, 158, 255, 0.15);
+    font-size: 14px;
+    font-weight: 600;
+    color: #303133;
+  }
+
+  .drawer-divider {
+    margin: 10px 0 8px;
   }
 }
 </style>

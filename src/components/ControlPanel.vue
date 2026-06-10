@@ -1,6 +1,6 @@
 <template>
   <div class="control-panel">
-    <div class="panel-actions-grid">
+    <div v-if="!hideActions" class="panel-actions-grid">
       <el-button
         :type="drawing ? 'warning' : 'success'"
         @click="$emit('toggle-drawing')"
@@ -26,7 +26,7 @@
 
       <el-button type="warning" class="grid-btn" @click="$emit('toggle-orientation')">
         <el-icon><Refresh /></el-icon>
-        <span>{{ orientation === 'landscape' ? '纵向' : '横向' }}</span>
+        <span>旋转</span>
       </el-button>
 
       <el-button class="grid-btn" @click="$emit('toggle-draw-mode')">
@@ -44,7 +44,7 @@
       </el-button>
     </div>
 
-    <el-divider class="panel-divider" />
+    <el-divider v-if="!hideActions" class="panel-divider" />
 
     <div class="segment-groups-header">
       <span class="segment-groups-title">分段列表</span>
@@ -76,18 +76,30 @@
             </el-tag>
           </el-button>
 
-          <el-button
+          <el-tag
             v-for="(cmp, cIdx) in group.compares"
             :key="cmp.segment.id"
-            size="small"
-            :type="currentSegment === cmp.flatIndex ? 'primary' : 'default'"
-            class="route-btn route-btn-compare"
+            :effect="currentSegment === cmp.flatIndex ? 'dark' : 'light'"
+            :type="currentSegment === cmp.flatIndex ? 'primary' : 'info'"
+            closable
+            draggable="true"
+            class="compare-tag"
+            :class="{
+              'is-dragging': dragFromKey === group.groupId + '-' + cIdx,
+              'is-drag-over': dragOverKey === group.groupId + '-' + cIdx
+            }"
             @click="$emit('switch-segment', cmp.flatIndex)"
+            @close="onRemoveCompare(cmp.segment)"
+            @dragstart="onDragStart($event, group.groupId, cIdx)"
+            @dragenter.prevent="onDragEnter(group.groupId, cIdx)"
+            @dragover.prevent="onDragOver($event, group.groupId)"
+            @drop.prevent.stop="onDrop(group.groupId, cIdx)"
+            @dragend="onDragEnd"
           >
             <span class="seg-color-dot" :style="{ background: cmp.segment.color }" />
             对比{{ cIdx + 1 }}
-            <el-tag v-if="cmp.segment.finished" size="small" type="info" effect="plain">轨迹</el-tag>
-          </el-button>
+            <span v-if="cmp.segment.finished" class="track-badge">轨迹</span>
+          </el-tag>
 
           <el-button
             v-if="group.canAddCompare"
@@ -103,6 +115,8 @@
       </div>
     </div>
 
+    <el-collapse v-model="activeCollapse" class="param-collapse">
+      <el-collapse-item name="params" title="参数设置">
     <div v-if="activeSegment" class="color-panel">
       <el-form-item
         :label="activeSegment.trackRole === 'compare' ? '对比路线颜色' : '实际路线颜色'"
@@ -156,7 +170,7 @@
           <el-input-number
             :model-value="pointSize"
             @update:model-value="$emit('update:pointSize', $event)"
-            :min="2"
+            :min="6"
             :step="1"
             size="small"
             controls-position="right"
@@ -166,7 +180,7 @@
           <el-input-number
             :model-value="lineWidth"
             @update:model-value="$emit('update:lineWidth', $event)"
-            :min="2"
+            :min="6"
             :step="1"
             size="small"
             controls-position="right"
@@ -176,21 +190,48 @@
           <el-input-number
             :model-value="landmarkSize"
             @update:model-value="$emit('update:landmarkSize', $event)"
-            :min="4"
-            :max="40"
+            :min="40"
+            :max="400"
+            :step="1"
+            size="small"
+            controls-position="right"
+          />
+        </el-form-item>
+        <el-form-item label="箭头" class="form-item-compact">
+          <el-input-number
+            :model-value="arrowSize"
+            @update:model-value="$emit('update:arrowSize', $event)"
+            :min="1"
+            :max="10"
             :step="1"
             size="small"
             controls-position="right"
           />
         </el-form-item>
       </div>
+      <div class="form-row">
+        <el-form-item label="标签透明度" class="form-item-compact form-item-grow">
+          <el-slider
+            :model-value="markerOpacity"
+            @update:model-value="$emit('update:markerOpacity', $event)"
+            :min="0.1"
+            :max="1"
+            :step="0.1"
+            :show-tooltip="true"
+            size="small"
+          />
+        </el-form-item>
+      </div>
     </el-form>
+      </el-collapse-item>
+    </el-collapse>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, computed } from 'vue'
+import { defineComponent, computed, ref } from 'vue'
 import { Edit, Delete, Picture, Refresh, Connection, LocationFilled } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import { MAP_SCALE_PRESETS } from '../utils/mapScale'
 import type { Segment } from '../types'
 import type { SegmentGroupView } from '../utils/segment'
@@ -209,7 +250,10 @@ export default defineComponent({
     mapScaleDenominator: { type: Number, required: true },
     pointSize: { type: Number, required: true },
     lineWidth: { type: Number, required: true },
-    landmarkSize: { type: Number, required: true }
+    landmarkSize: { type: Number, required: true },
+    arrowSize: { type: Number, default: 1 },
+    markerOpacity: { type: Number, default: 0.7 },
+    hideActions: { type: Boolean, default: false }
   },
   emits: [
     'toggle-drawing',
@@ -222,14 +266,74 @@ export default defineComponent({
     'add-segment-group',
     'switch-segment',
     'update-segment-color',
+    'remove-segment',
+    'reorder-compares',
     'update:scaleEnabled',
     'update:mapScaleDenominator',
     'update:pointSize',
     'update:lineWidth',
-    'update:landmarkSize'
+    'update:landmarkSize',
+    'update:arrowSize',
+    'update:markerOpacity'
   ],
   setup(props, { emit }) {
     const mapScalePresets = MAP_SCALE_PRESETS
+    const activeCollapse = ref<string[]>([])
+
+    const dragFromKey = ref<string | null>(null)
+    const dragOverKey = ref<string | null>(null)
+    const dragSource = ref<{ groupId: string; index: number } | null>(null)
+
+    const onDragStart = (e: DragEvent, groupId: string, index: number) => {
+      dragSource.value = { groupId, index }
+      dragFromKey.value = `${groupId}-${index}`
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', `${groupId}:${index}`)
+      }
+    }
+
+    const onDragEnter = (groupId: string, index: number) => {
+      if (!dragSource.value || dragSource.value.groupId !== groupId) return
+      dragOverKey.value = `${groupId}-${index}`
+    }
+
+    const onDragOver = (e: DragEvent, groupId: string) => {
+      if (!dragSource.value || dragSource.value.groupId !== groupId) return
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+    }
+
+    const onDrop = (groupId: string, toIndex: number) => {
+      const src = dragSource.value
+      if (src && src.groupId === groupId && src.index !== toIndex) {
+        emit('reorder-compares', groupId, src.index, toIndex)
+      }
+      dragSource.value = null
+      dragFromKey.value = null
+      dragOverKey.value = null
+    }
+
+    const onDragEnd = () => {
+      dragSource.value = null
+      dragFromKey.value = null
+      dragOverKey.value = null
+    }
+
+    const onRemoveCompare = async (segment: Segment) => {
+      const hasContent = segment.points.length > 0 || segment.markers.length > 0
+      if (hasContent) {
+        try {
+          await ElMessageBox.confirm(
+            `确定删除「${segment.name}」？该路线包含 ${segment.points.length} 个点位、${segment.markers.length} 个标记，删除后无法恢复。`,
+            '删除对比路线',
+            { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+          )
+        } catch {
+          return
+        }
+      }
+      emit('remove-segment', segment.id)
+    }
     const activeSegment = computed(
       () =>
         props.segmentGroups
@@ -269,8 +373,17 @@ export default defineComponent({
       colorPresets,
       activeSegment,
       activeGroupId,
+      activeCollapse,
       scaleEnabledProxy,
-      mapScaleProxy
+      mapScaleProxy,
+      dragFromKey,
+      dragOverKey,
+      onDragStart,
+      onDragEnter,
+      onDragOver,
+      onDrop,
+      onDragEnd,
+      onRemoveCompare
     }
   }
 })
@@ -279,6 +392,25 @@ export default defineComponent({
 <style scoped lang="scss">
 .control-panel {
   width: 100%;
+}
+
+.param-collapse {
+  border: none;
+  :deep(.el-collapse-item__header) {
+    font-size: 12px;
+    font-weight: 600;
+    color: #606266;
+    height: 32px;
+    line-height: 32px;
+    background: transparent;
+  }
+  :deep(.el-collapse-item__wrap) {
+    border: none;
+    background: transparent;
+  }
+  :deep(.el-collapse-item__content) {
+    padding-bottom: 4px;
+  }
 }
 
 .panel-actions-grid {
@@ -367,6 +499,35 @@ export default defineComponent({
 
 .route-btn-add {
   padding: 0 6px !important;
+}
+
+.compare-tag {
+  cursor: grab;
+  user-select: none;
+  transition:
+    transform 0.15s,
+    opacity 0.15s,
+    box-shadow 0.15s;
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  &.is-dragging {
+    opacity: 0.4;
+    transform: scale(0.92);
+  }
+
+  &.is-drag-over {
+    box-shadow: 0 0 0 2px #409eff;
+    transform: scale(1.05);
+  }
+
+  .track-badge {
+    margin-left: 4px;
+    font-size: 10px;
+    color: #909399;
+  }
 }
 
 .seg-color-dot {
