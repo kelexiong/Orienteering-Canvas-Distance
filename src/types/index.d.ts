@@ -1,4 +1,4 @@
-// This file defines the types and interfaces used in the project for TypeScript type checking.
+﻿// 项目类型定义
 
 export type CanvasSize = 'A4' | 'A5'
 
@@ -6,7 +6,6 @@ export interface Point {
   x: number
   y: number
   type?: 'line' | 'curve'
-  description?: string // 点位备注
   timestamp?: Date
 }
 
@@ -30,26 +29,27 @@ export interface Marker {
 /** 实际跑动轨迹 | 对比路线 */
 export type SegmentTrackRole = 'actual' | 'compare'
 
-// 分段日记类型
+// 分段记录类型
 export interface Segment {
   id: string
   name: string
   points: Point[]
   markers: Marker[]
-  description: string // 线段整体描述
+  description: string // 分段整体描述
   createdAt: Date
   updatedAt: Date
   distance?: number
   duration?: number
   image?: string // 分段截图
+  groupImage?: string // 同组实际/对比路线截图
   /** 同组：一条实际路线 + 若干对比路线 */
   groupId: string
   trackRole: SegmentTrackRole
-  /** 对比路线所对应的实际分段 id */
+  /** 对比路线对应的实际分段 id */
   parentActualId?: string
   /** 轨迹线颜色 */
   color: string
-  /** 结束后仅显示轨迹线，隐藏点位 */
+  /** 结束后仅显示轨迹线，隐藏控制点 */
   finished: boolean
 }
 
@@ -59,14 +59,14 @@ export interface ProjectConfig {
   author: string
   date: Date
   scale: number
+  scaleEnabled?: boolean
   orientation: 'portrait' | 'landscape'
   imageSrc?: string
 }
 
-// 导出PDF配置
+// 导出 PDF 配置
 export interface PDFConfig {
   includeMap: boolean
-  includePoints: boolean
   includeMarkers: boolean
   includeDescriptions: boolean
   pageSize: 'A4' | 'A5' | 'letter'

@@ -1,11 +1,11 @@
-<template>
+﻿<template>
   <div class="home-tech-bg">
     <header class="top-toolbar animate__animated animate__fadeInDown">
       <div class="brand">
         <el-icon class="logo"><Compass /></el-icon>
         <span class="title">定向越野绘图笔记</span>
       </div>
-      <div class="actions">
+      <div class="actions desktop-actions">
         <el-button
           :type="drawing ? 'warning' : 'success'"
           @click="onToggleDrawing"
@@ -14,14 +14,32 @@
           <el-icon><Edit /></el-icon>
           <span>{{ drawing ? '结束绘制' : '开始绘制' }}</span>
         </el-button>
-        <el-popconfirm title="确定要清除所有点位吗？" @confirm="clearPoints">
+        <el-popconfirm title="确定要清空所有轨迹吗？" @confirm="clearPoints">
           <template #reference>
             <el-button type="danger" class="tb-btn">
               <el-icon><Delete /></el-icon>
-              <span>清除</span>
+              <span>清空</span>
             </el-button>
           </template>
         </el-popconfirm>
+        <el-button
+          class="tb-btn"
+          :disabled="!canUndo"
+          title="撤销 Ctrl+Z"
+          @click="undo"
+        >
+          <el-icon><RefreshLeft /></el-icon>
+          <span>撤销</span>
+        </el-button>
+        <el-button
+          class="tb-btn"
+          :disabled="!canRedo"
+          title="重做 Ctrl+Y"
+          @click="redo"
+        >
+          <el-icon><RefreshRight /></el-icon>
+          <span>重做</span>
+        </el-button>
         <el-button type="info" class="tb-btn" @click="triggerImageUpload">
           <el-icon><Picture /></el-icon>
           <span>插图</span>
@@ -43,7 +61,7 @@
           @click="toggleLandmarkMode"
         >
           <el-icon><LocationFilled /></el-icon>
-          <span>{{ landmarkMode ? '图钉中' : '参照物' }}</span>
+          <span>{{ landmarkMode ? '图钉中' : '参考物' }}</span>
         </el-button>
         <el-button type="primary" plain class="tb-btn" @click="addSegmentGroup">
           <el-icon><Plus /></el-icon>
@@ -54,7 +72,7 @@
         <el-button
           :type="panelDrawerVisible ? 'primary' : 'default'"
           class="tb-btn panel-toggle-btn"
-          @click="panelDrawerVisible = !panelDrawerVisible"
+          @click="togglePanel"
         >
           <el-icon><Operation /></el-icon>
           <span>面板</span>
@@ -71,6 +89,7 @@
           :height="canvasHeight"
           :current-segment="currentSegment"
           :scale="mapScaleDenominator"
+          :scale-enabled="scaleEnabled"
           :pointSizeNuber="pointSizeNuber"
           :landmarkSizeNuber="landmarkSizeNuber"
           :LineWidthNuber="LineWidthNuber"
@@ -92,16 +111,26 @@
       <div
         v-if="isMobile && panelDrawerVisible"
         class="side-panel-mask"
-        @click="panelDrawerVisible = false"
+        @click="closePanel"
       ></div>
 
-      <aside class="side-panel" :class="{ 'is-collapsed': !panelDrawerVisible }">
+      <aside
+        class="side-panel"
+        :class="{
+          'is-collapsed': !panelDrawerVisible,
+          'is-mobile-full': isMobile && mobilePanelState === 'full'
+        }"
+      >
         <div class="side-panel-inner">
           <div class="mobile-panel-header">
+            <button class="sheet-handle" type="button" @click="toggleMobilePanelSize"></button>
             <span>记录面板</span>
-            <el-button size="small" text type="primary" @click="panelDrawerVisible = false">
-              收起
-            </el-button>
+            <div class="mobile-panel-actions">
+              <el-button size="small" text type="primary" @click="toggleMobilePanelSize">
+                {{ mobilePanelState === 'full' ? '半屏' : '全屏' }}
+              </el-button>
+              <el-button size="small" text type="primary" @click="closePanel">收起</el-button>
+            </div>
           </div>
           <ControlPanel
             hide-actions
@@ -136,7 +165,7 @@
             @update:arrow-size="arrowSizeNuber = $event"
             @update:marker-opacity="markerOpacity = $event"
           />
-          <el-divider class="drawer-divider">点位列表</el-divider>
+          <el-divider class="drawer-divider">轨迹记录</el-divider>
           <DiaryList
             :segment="segments[currentSegment]"
             :scale-enabled="scaleEnabled"
@@ -146,13 +175,15 @@
             :all-segments="segments"
             :landmark-size="landmarkSizeNuber"
             :canvas-element="getCanvasElement()"
+            :capture-segment-image="captureSegmentImageForExport"
+            :capture-segment-group-image="captureSegmentGroupImageForExport"
             @remove-point="removePoint"
             @insert-point-mode="onInsertPointMode"
             @edit-point-mode="onEditPointMode"
             @toggle-type="togglePointType"
             :landmark-mode="landmarkMode"
             :drawing="drawing"
-            @update-point-description="updatePointDescription"
+            @update-segment-description="updateSegmentDescription"
             @remove-marker="removeMarker"
             @update-marker-description="updateMarkerDescription"
             @toggle-landmark-mode="toggleLandmarkMode"
@@ -168,15 +199,79 @@
       style="display: none"
       @change="onImageChange"
     />
+
+    <nav class="mobile-bottom-toolbar" aria-label="移动端绘图工具">
+      <button
+        type="button"
+        class="mobile-tool"
+        :class="{ active: activeInteractionMode === 'view' }"
+        @click="setInteractionMode('view')"
+      >
+        <el-icon><View /></el-icon>
+        <span>查看</span>
+      </button>
+      <button
+        type="button"
+        class="mobile-tool"
+        :class="{ active: activeInteractionMode === 'draw' }"
+        @click="setInteractionMode('draw')"
+      >
+        <el-icon><Edit /></el-icon>
+        <span>{{ drawing ? '结束' : '绘制' }}</span>
+      </button>
+      <button
+        type="button"
+        class="mobile-tool"
+        :class="{ active: activeInteractionMode === 'landmark' }"
+        @click="setInteractionMode('landmark')"
+      >
+        <el-icon><LocationFilled /></el-icon>
+        <span>图钉</span>
+      </button>
+      <button type="button" class="mobile-tool" :disabled="!canUndo" @click="undo">
+        <el-icon><RefreshLeft /></el-icon>
+        <span>撤销</span>
+      </button>
+      <button type="button" class="mobile-tool" :disabled="!canRedo" @click="redo">
+        <el-icon><RefreshRight /></el-icon>
+        <span>重做</span>
+      </button>
+      <button
+        type="button"
+        class="mobile-tool"
+        :class="{ active: panelDrawerVisible }"
+        @click="togglePanel"
+      >
+        <el-icon><Operation /></el-icon>
+        <span>记录</span>
+      </button>
+      <el-dropdown trigger="click" placement="top-end">
+        <button type="button" class="mobile-tool">
+          <el-icon><MoreFilled /></el-icon>
+          <span>更多</span>
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item @click="triggerImageUpload">插入地图</el-dropdown-item>
+            <el-dropdown-item @click="rotateImage">旋转地图</el-dropdown-item>
+            <el-dropdown-item @click="drawMode = drawMode === 'line' ? 'curve' : 'line'">
+              切换为{{ drawMode === 'line' ? '曲线' : '直线' }}
+            </el-dropdown-item>
+            <el-dropdown-item @click="addSegmentGroup">新增分段</el-dropdown-item>
+            <el-dropdown-item divided @click="confirmClearPoints">清空轨迹</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </nav>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { defineComponent, ref, computed, watch, onMounted, onUnmounted, toRaw } from 'vue'
 import Canvas from '../components/Canvas.vue'
 import DiaryList from '../components/DiaryList.vue'
 import ControlPanel from '../components/ControlPanel.vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Compass,
   Menu,
@@ -184,14 +279,32 @@ import {
   Delete,
   Picture,
   Refresh,
+  RefreshLeft,
+  RefreshRight,
   Connection,
   LocationFilled,
   Plus,
-  Operation
+  Operation,
+  View,
+  MoreFilled
 } from '@element-plus/icons-vue'
 import type { Segment, Point, Marker } from '../types'
 import { MAP_SCALE_PRESETS } from '../utils/mapScale'
 import { createSegment, buildSegmentGroups } from '../utils/segment'
+
+type DrawMode = 'line' | 'curve'
+
+interface HistorySnapshot {
+  segments: Segment[]
+  currentSegment: number
+  drawing: boolean
+  landmarkMode: boolean
+  insertMode: { segIdx: number; ptIdx: number } | null
+  editMode: { segIdx: number; ptIdx: number } | null
+  drawMode: DrawMode
+  imageSrc: string | null
+  imageRotation: number
+}
 
 export default defineComponent({
   components: {
@@ -204,21 +317,24 @@ export default defineComponent({
     Delete,
     Picture,
     Refresh,
+    RefreshLeft,
+    RefreshRight,
     Connection,
     LocationFilled,
     Plus,
-    Operation
+    Operation,
+    View,
+    MoreFilled
   },
   setup() {
     const drawing = ref(false)
     const imageSrc = ref<string | null>(null)
     const fileInput = ref<HTMLInputElement | null>(null)
     const canvasRef = ref<any>(null)
-    const loading = ref(false) // 加载状态
-    const drawMode = ref<'line' | 'curve'>('line')
+    const loading = ref(false)
+    const drawMode = ref<DrawMode>('line')
     const showLandscapeTip = ref(false)
 
-    // 自定义Hook管理点位逻辑 - 使用新的Segment数据结构
     const segments = ref<Segment[]>([
       createSegment({
         name: '实际路线1',
@@ -229,6 +345,66 @@ export default defineComponent({
     const currentSegment = ref(0)
     const insertMode = ref<{ segIdx: number; ptIdx: number } | null>(null)
     const editMode = ref<{ segIdx: number; ptIdx: number } | null>(null)
+    const historyLimit = 80
+    const undoStack = ref<HistorySnapshot[]>([])
+    const redoStack = ref<HistorySnapshot[]>([])
+    const lastHistoryKey = ref<string | null>(null)
+
+    const cloneValue = <T,>(value: T): T => structuredClone(toRaw(value))
+
+    const createHistorySnapshot = (): HistorySnapshot => ({
+      segments: cloneValue(segments.value),
+      currentSegment: currentSegment.value,
+      drawing: drawing.value,
+      landmarkMode: landmarkMode.value,
+      insertMode: cloneValue(insertMode.value),
+      editMode: cloneValue(editMode.value),
+      drawMode: drawMode.value,
+      imageSrc: imageSrc.value,
+      imageRotation: imageRotation.value
+    })
+
+    const restoreHistorySnapshot = (snapshot: HistorySnapshot) => {
+      segments.value = cloneValue(snapshot.segments)
+      currentSegment.value = Math.min(
+        Math.max(snapshot.currentSegment, 0),
+        Math.max(segments.value.length - 1, 0)
+      )
+      drawing.value = snapshot.drawing
+      landmarkMode.value = snapshot.landmarkMode
+      insertMode.value = cloneValue(snapshot.insertMode)
+      editMode.value = cloneValue(snapshot.editMode)
+      drawMode.value = snapshot.drawMode
+      imageSrc.value = snapshot.imageSrc
+      imageRotation.value = snapshot.imageRotation
+    }
+
+    const recordHistory = (key?: string, mergeConsecutive = false) => {
+      if (mergeConsecutive && key && lastHistoryKey.value === key) return
+      undoStack.value.push(createHistorySnapshot())
+      if (undoStack.value.length > historyLimit) undoStack.value.shift()
+      redoStack.value = []
+      lastHistoryKey.value = mergeConsecutive ? key ?? null : null
+    }
+
+    const canUndo = computed(() => undoStack.value.length > 0)
+    const canRedo = computed(() => redoStack.value.length > 0)
+
+    const undo = () => {
+      const snapshot = undoStack.value.pop()
+      if (!snapshot) return
+      redoStack.value.push(createHistorySnapshot())
+      restoreHistorySnapshot(snapshot)
+      lastHistoryKey.value = null
+    }
+
+    const redo = () => {
+      const snapshot = redoStack.value.pop()
+      if (!snapshot) return
+      undoStack.value.push(createHistorySnapshot())
+      restoreHistorySnapshot(snapshot)
+      lastHistoryKey.value = null
+    }
 
     const resumeSegmentEditing = (segIdx: number) => {
       const seg = segments.value[segIdx]
@@ -242,7 +418,8 @@ export default defineComponent({
       const cur = segments.value[currentSegment.value]
       if (!cur) return
       if (cur.finished && !drawing.value) return
-      const type = drawMode.value // 'line' 或 'curve'
+      recordHistory('add-point')
+      const type = drawMode.value
       const newPoint: Point = {
         ...point,
         type,
@@ -250,7 +427,6 @@ export default defineComponent({
       }
 
       if (editMode.value) {
-        // 编辑模式
         const { segIdx, ptIdx } = editMode.value
         const old = segments.value[segIdx].points[ptIdx]
         segments.value[segIdx].points.splice(ptIdx, 1, { ...newPoint, type: old.type })
@@ -258,39 +434,28 @@ export default defineComponent({
         editMode.value = null
         drawing.value = false
       } else if (insertMode.value) {
-        // 插入模式
         const { segIdx, ptIdx } = insertMode.value
         segments.value[segIdx].points.splice(ptIdx, 0, newPoint)
         segments.value[segIdx].updatedAt = new Date()
         insertMode.value = null
         drawing.value = false
+      } else if (segments.value[currentSegment.value].points.length === 0) {
+        segments.value[currentSegment.value].points.push({ ...newPoint, type: undefined })
+        segments.value[currentSegment.value].updatedAt = new Date()
       } else {
-        // 普通追加
-        if (segments.value[currentSegment.value].points.length === 0) {
-          segments.value[currentSegment.value].points.push({ ...newPoint, type: undefined })
-        } else {
-          segments.value[currentSegment.value].points.push(newPoint)
-        }
+        segments.value[currentSegment.value].points.push(newPoint)
         segments.value[currentSegment.value].updatedAt = new Date()
       }
     }
 
-    const updatePoint = (segIdx: number, ptIdx: number, newPoint: { x: number; y: number }) => {
-      const old = segments.value[segIdx].points[ptIdx]
-      segments.value[segIdx].points.splice(ptIdx, 1, { ...newPoint, type: old.type })
-      segments.value[segIdx].updatedAt = new Date()
-      console.log('updatePoint', segments.value)
-    }
-
     const removePoint = (segIdx: number, ptIdx: number) => {
-      resumeSegmentEditing(segIdx)
       if (segments.value[segIdx] && segments.value[segIdx].points[ptIdx] !== undefined) {
+        recordHistory('remove-point')
+        resumeSegmentEditing(segIdx)
         segments.value[segIdx].points.splice(ptIdx, 1)
         segments.value[segIdx].updatedAt = new Date()
-        // 如果分段被删空，且不是唯一分段，则自动删除该分段
         if (segments.value[segIdx].points.length === 0 && segments.value.length > 1) {
           segments.value.splice(segIdx, 1)
-          // 修正 currentSegment
           if (currentSegment.value >= segments.value.length) {
             currentSegment.value = segments.value.length - 1
           }
@@ -298,14 +463,8 @@ export default defineComponent({
       }
     }
 
-    const insertPoint = (segIdx: number, ptIdx: number, point: Point) => {
-      if (segments.value[segIdx]) {
-        segments.value[segIdx].points.splice(ptIdx, 0, point)
-        segments.value[segIdx].updatedAt = new Date()
-      }
-    }
-
     const clearPoints = () => {
+      recordHistory('clear-points')
       segments.value = [
         createSegment({
           name: '实际路线1',
@@ -318,6 +477,19 @@ export default defineComponent({
       landmarkMode.value = false
     }
 
+    const confirmClearPoints = async () => {
+      try {
+        await ElMessageBox.confirm('确定要清空所有轨迹吗？', '清空轨迹', {
+          confirmButtonText: '清空',
+          cancelButtonText: '取消',
+          type: 'warning'
+        })
+        clearPoints()
+      } catch {
+        // 用户取消时不做处理。
+      }
+    }
+
     const cacheSegmentImage = async (idx: number) => {
       if (canvasRef.value?.captureSegmentImage && segments.value[idx]) {
         const image = await canvasRef.value.captureSegmentImage(idx)
@@ -325,13 +497,14 @@ export default defineComponent({
       }
     }
 
-    const finishCurrentSegment = async () => {
+    const finishCurrentSegment = async (shouldRecordHistory = true) => {
       const seg = segments.value[currentSegment.value]
       if (!seg || seg.finished) return
       if (seg.points.length < 2) {
         ElMessage.warning('至少需要 2 个点才能结束分段')
         return
       }
+      if (shouldRecordHistory) recordHistory('finish-segment')
       await cacheSegmentImage(currentSegment.value)
       seg.finished = true
       seg.updatedAt = new Date()
@@ -350,12 +523,15 @@ export default defineComponent({
       if (!gid) return
       const actual = findFinishedActualInGroup(gid)
       if (!actual) {
-        ElMessage.warning('请先「结束绘制」实际跑动路线，再添加对比路线')
+        ElMessage.warning('请先结束实际跑动路线，再添加对比路线')
         return
       }
       const cur = segments.value[currentSegment.value]
       if (cur && drawing.value && cur.points.length > 0) {
-        await finishCurrentSegment()
+        recordHistory('add-compare-route')
+        await finishCurrentSegment(false)
+      } else {
+        recordHistory('add-compare-route')
       }
       const compareCount = segments.value.filter(
         s => s.groupId === gid && s.trackRole === 'compare'
@@ -374,15 +550,16 @@ export default defineComponent({
 
     const addSegmentGroup = async () => {
       const cur = segments.value[currentSegment.value]
+      recordHistory('add-segment-group')
       if (cur && drawing.value && cur.points.length > 0) {
-        await finishCurrentSegment()
+        await finishCurrentSegment(false)
       } else if (cur && !cur.finished && cur.points.length >= 2) {
-        await finishCurrentSegment()
+        await finishCurrentSegment(false)
       }
       const groupId = `group-${Date.now()}`
       const groupCount = new Set(segments.value.map(s => s.groupId)).size
       const newSeg = createSegment({
-        name: `实际跑动`,
+        name: `实际路线${groupCount + 1}`,
         trackRole: 'actual',
         groupId
       })
@@ -390,11 +567,12 @@ export default defineComponent({
       currentSegment.value = segments.value.length - 1
       drawing.value = false
       landmarkMode.value = false
-      ElMessage.success(`已新增分段${groupCount + 1}`)
+      ElMessage.success(`已新增分段 ${groupCount + 1}`)
     }
 
     const updateSegmentColor = (segIdx: number, color: string) => {
       if (segments.value[segIdx]) {
+        recordHistory(`segment-color-${segIdx}`)
         segments.value[segIdx].color = color
         segments.value[segIdx].updatedAt = new Date()
       }
@@ -405,6 +583,7 @@ export default defineComponent({
       if (idx === -1) return
       const seg = segments.value[idx]
       if (seg.trackRole === 'actual') return
+      recordHistory('remove-segment')
       segments.value.splice(idx, 1)
       if (currentSegment.value >= segments.value.length) {
         currentSegment.value = segments.value.length - 1
@@ -424,6 +603,7 @@ export default defineComponent({
         .map((s, i) => ({ seg: s, globalIdx: i }))
         .filter(({ seg }) => seg.groupId === groupId && seg.trackRole === 'compare')
       if (fromIdx < 0 || fromIdx >= compares.length || toIdx < 0 || toIdx >= compares.length) return
+      recordHistory('reorder-compares')
       const movedGlobalIdx = compares[fromIdx].globalIdx
       const [moved] = segments.value.splice(movedGlobalIdx, 1)
       const targetGlobalIdx =
@@ -442,46 +622,39 @@ export default defineComponent({
       }
     }
 
-    // 新增：更新分段描述
     const updateSegmentDescription = (segIdx: number, description: string) => {
       if (segments.value[segIdx]) {
+        recordHistory(`segment-description-${segIdx}`, true)
         segments.value[segIdx].description = description
         segments.value[segIdx].updatedAt = new Date()
       }
     }
 
-    // 新增：更新点位描述
     const updateMarkerDescription = (segIdx: number, markerId: string, content: string) => {
       const seg = segments.value[segIdx]
       if (!seg) return
       const m = seg.markers.find(x => x.id === markerId)
       if (m) {
+        recordHistory(`marker-description-${segIdx}-${markerId}`, true)
         m.content = content
         seg.updatedAt = new Date()
       }
     }
 
-    const updatePointDescription = (segIdx: number, ptIdx: number, description: string) => {
-      if (segments.value[segIdx] && segments.value[segIdx].points[ptIdx]) {
-        segments.value[segIdx].points[ptIdx].description = description
-        segments.value[segIdx].updatedAt = new Date()
-      }
-    }
-
-    // 新增：删除标记
     const removeMarker = (segIdx: number, markerId: string) => {
       if (segments.value[segIdx]) {
         const markerIndex = segments.value[segIdx].markers.findIndex(m => m.id === markerId)
         if (markerIndex !== -1) {
+          recordHistory('remove-marker')
           segments.value[segIdx].markers.splice(markerIndex, 1)
           segments.value[segIdx].updatedAt = new Date()
         }
       }
     }
 
-    // 新增：添加标记
     const addMarker = (segIdx: number, marker: Omit<Marker, 'id' | 'timestamp'>) => {
       if (segments.value[segIdx]) {
+        recordHistory('add-marker')
         const newMarker: Marker = {
           ...marker,
           id: Date.now().toString(),
@@ -492,7 +665,6 @@ export default defineComponent({
       }
     }
 
-    // 自定义Hook管理画布设置
     const orientation = ref<'landscape' | 'portrait'>('landscape')
     const imageRotation = ref(0)
     const scaleEnabled = ref(false)
@@ -510,10 +682,10 @@ export default defineComponent({
     const segmentGroups = computed(() => buildSegmentGroups(segments.value))
 
     const rotateImage = () => {
+      recordHistory('rotate-image')
       imageRotation.value = (imageRotation.value + 90) % 360
     }
 
-    // 监听模式变化，动态修改 body 的 cursor
     const isEditOrInsertMode = computed(() => !!editMode.value || !!insertMode.value)
     watch(isEditOrInsertMode, val => {
       if (!landmarkMode.value) {
@@ -542,8 +714,9 @@ export default defineComponent({
         }
       } else {
         if (seg.finished) {
+          recordHistory('resume-segment-editing')
           resumeSegmentEditing(currentSegment.value)
-          ElMessage.info('已进入编辑模式，修改后请再次「结束绘制」以固化轨迹')
+          ElMessage.info('已进入编辑模式，修改后请再次结束绘制以固定轨迹')
         }
         drawing.value = true
         landmarkMode.value = false
@@ -564,7 +737,6 @@ export default defineComponent({
       landmarkMode.value = false
     }
 
-    // 移动端按竖屏正常使用，不再尝试强制横屏
     function checkOrientation() {
       showLandscapeTip.value = false
     }
@@ -578,13 +750,73 @@ export default defineComponent({
 
     const panelDrawerVisible = ref(true)
     const isMobile = ref(false)
-    // 响应式判断
+    const mobilePanelState = ref<'closed' | 'half' | 'full'>('closed')
+    const activeInteractionMode = computed<'view' | 'draw' | 'landmark'>(() => {
+      if (landmarkMode.value) return 'landmark'
+      if (drawing.value) return 'draw'
+      return 'view'
+    })
+
+    const openPanel = () => {
+      panelDrawerVisible.value = true
+      if (isMobile.value && mobilePanelState.value === 'closed') {
+        mobilePanelState.value = 'half'
+      }
+    }
+
+    const closePanel = () => {
+      panelDrawerVisible.value = false
+      if (isMobile.value) mobilePanelState.value = 'closed'
+    }
+
+    const togglePanel = () => {
+      if (panelDrawerVisible.value) {
+        closePanel()
+      } else {
+        openPanel()
+      }
+    }
+
+    const toggleMobilePanelSize = () => {
+      if (!isMobile.value) return
+      if (!panelDrawerVisible.value) {
+        openPanel()
+        return
+      }
+      mobilePanelState.value = mobilePanelState.value === 'full' ? 'half' : 'full'
+    }
+
+    const setInteractionMode = async (mode: 'view' | 'draw' | 'landmark') => {
+      if (mode === 'view') {
+        if (drawing.value) {
+          await onToggleDrawing()
+        } else {
+          landmarkMode.value = false
+          editMode.value = null
+          insertMode.value = null
+        }
+        return
+      }
+
+      if (mode === 'draw') {
+        if (landmarkMode.value) landmarkMode.value = false
+        await onToggleDrawing()
+        return
+      }
+
+      if (mode === 'landmark') {
+        if (drawing.value) await onToggleDrawing()
+        if (!landmarkMode.value) toggleLandmarkMode()
+      }
+    }
+
     const checkMobile = () => {
       const nextIsMobile = window.innerWidth <= 768
       if (nextIsMobile && !isMobile.value) {
-        panelDrawerVisible.value = false
+        closePanel()
       } else if (!nextIsMobile && isMobile.value) {
         panelDrawerVisible.value = true
+        mobilePanelState.value = 'closed'
       }
       isMobile.value = nextIsMobile
     }
@@ -596,23 +828,94 @@ export default defineComponent({
       window.removeEventListener('resize', checkMobile)
     })
 
-    // 新增：切换type
     const togglePointType = (segIdx: number, ptIdx: number) => {
-      resumeSegmentEditing(segIdx)
       const pt = segments.value[segIdx].points[ptIdx]
       if (!pt) return
+      recordHistory('toggle-point-type')
+      resumeSegmentEditing(segIdx)
       const newType = !pt.type || pt.type === 'line' ? 'curve' : 'line'
       segments.value[segIdx].points.splice(ptIdx, 1, { ...pt, type: newType })
       segments.value[segIdx].updatedAt = new Date()
     }
 
-    // 获取canvas元素
+    const triggerImageUpload = () => {
+      loading.value = true
+      fileInput.value?.click()
+    }
+
+    const onImageChange = (e: Event) => {
+      const input = e.target as HTMLInputElement
+      const files = input.files
+      if (files && files[0]) {
+        const reader = new FileReader()
+        reader.onload = evt => {
+          recordHistory('upload-image')
+          imageSrc.value = evt.target?.result as string
+          loading.value = false
+          input.value = ''
+        }
+        reader.onerror = () => {
+          loading.value = false
+          input.value = ''
+        }
+        reader.readAsDataURL(files[0])
+      } else {
+        loading.value = false
+      }
+    }
+
+    const onInsertPointMode = (segIdx: number, ptIdx: number) => {
+      if (!segments.value[segIdx]) return
+      recordHistory('insert-point-mode')
+      resumeSegmentEditing(segIdx)
+      insertMode.value = { segIdx, ptIdx: ptIdx + 1 }
+      editMode.value = null
+      drawing.value = true
+    }
+
+    const onEditPointMode = (segIdx: number, ptIdx: number) => {
+      if (!segments.value[segIdx]?.points[ptIdx]) return
+      recordHistory('edit-point-mode')
+      resumeSegmentEditing(segIdx)
+      editMode.value = { segIdx, ptIdx }
+      insertMode.value = null
+      drawing.value = true
+    }
+
+    const isTypingTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null
+      if (!el) return false
+      const tag = el.tagName?.toLowerCase()
+      return tag === 'input' || tag === 'textarea' || el.isContentEditable
+    }
+
+    const handleHistoryShortcut = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.metaKey || isTypingTarget(event.target)) return
+      const key = event.key.toLowerCase()
+      if (key === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) {
+          if (canRedo.value) redo()
+        } else if (canUndo.value) {
+          undo()
+        }
+      } else if (key === 'y') {
+        event.preventDefault()
+        if (canRedo.value) redo()
+      }
+    }
+
+    onMounted(() => {
+      window.addEventListener('keydown', handleHistoryShortcut)
+    })
+    onUnmounted(() => {
+      window.removeEventListener('keydown', handleHistoryShortcut)
+    })
+
     const getCanvasElement = () => {
-      // 在选项式API中，通过$refs访问组件实例
       return canvasRef.value?.$refs?.canvas || canvasRef.value?.canvas || null
     }
 
-    // 补全所有分段的image，确保每个分段都有截图
     const fillSegmentImages = async () => {
       if (!canvasRef.value?.captureSegmentImage) return
       for (let idx = 0; idx < segments.value.length; idx++) {
@@ -624,7 +927,16 @@ export default defineComponent({
       }
     }
 
-    // 在返回值中添加_segments用于模板绑定
+    const captureSegmentImageForExport = async (idx: number) => {
+      if (!canvasRef.value?.captureSegmentImage) return null
+      return canvasRef.value.captureSegmentImage(idx)
+    }
+
+    const captureSegmentGroupImageForExport = async (groupId: string) => {
+      if (!canvasRef.value?.captureSegmentGroupImage) return null
+      return canvasRef.value.captureSegmentGroupImage(groupId)
+    }
+
     return {
       segments,
       currentSegment,
@@ -648,23 +960,8 @@ export default defineComponent({
       onToggleDrawing,
       toggleLandmarkMode,
       onAddMarker,
-      triggerImageUpload: () => {
-        loading.value = true
-        fileInput.value?.click()
-      },
-      onImageChange: (e: Event) => {
-        const files = (e.target as HTMLInputElement).files
-        if (files && files[0]) {
-          const reader = new FileReader()
-          reader.onload = evt => {
-            imageSrc.value = evt.target?.result as string
-            loading.value = false
-          }
-          reader.readAsDataURL(files[0])
-        } else {
-          loading.value = false
-        }
-      },
+      triggerImageUpload,
+      onImageChange,
       pointSizeNuber,
       LineWidthNuber,
       arrowSizeNuber,
@@ -678,18 +975,8 @@ export default defineComponent({
       orientation,
       imageRotation,
       rotateImage,
-      onInsertPointMode: (segIdx: number, ptIdx: number) => {
-        resumeSegmentEditing(segIdx)
-        insertMode.value = { segIdx, ptIdx: ptIdx + 1 }
-        editMode.value = null
-        drawing.value = true
-      },
-      onEditPointMode: (segIdx: number, ptIdx: number) => {
-        resumeSegmentEditing(segIdx)
-        editMode.value = { segIdx, ptIdx }
-        insertMode.value = null
-        drawing.value = true
-      },
+      onInsertPointMode,
+      onEditPointMode,
       canvasWidth,
       canvasHeight,
       Canvas,
@@ -698,14 +985,25 @@ export default defineComponent({
       showLandscapeTip,
       panelDrawerVisible,
       isMobile,
+      mobilePanelState,
+      activeInteractionMode,
+      setInteractionMode,
+      togglePanel,
+      closePanel,
+      toggleMobilePanelSize,
       togglePointType,
       updateSegmentDescription,
-      updatePointDescription,
       removeMarker,
       addMarker,
       canvasRef,
       getCanvasElement,
-      fillSegmentImages
+      fillSegmentImages,
+      captureSegmentImageForExport,
+      captureSegmentGroupImageForExport,
+      canUndo,
+      canRedo,
+      undo,
+      redo
     }
   }
 })
@@ -847,6 +1145,11 @@ export default defineComponent({
   display: none;
 }
 
+.sheet-handle,
+.mobile-bottom-toolbar {
+  display: none;
+}
+
 :deep(.diary-card) {
   width: 100%;
   box-sizing: border-box;
@@ -893,9 +1196,20 @@ export default defineComponent({
   .top-toolbar {
     padding: 6px 8px;
     gap: 8px;
+    justify-content: space-between;
     .brand .logo {
       font-size: 1.3rem;
       margin-right: 0;
+    }
+    .brand .title {
+      display: inline;
+      max-width: 42vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .desktop-actions,
+    .toolbar-right {
+      display: none;
     }
     .actions {
       gap: 4px;
@@ -907,7 +1221,7 @@ export default defineComponent({
   }
 
   .canvas-stage {
-    padding: 4px;
+    padding: 4px 4px 76px;
   }
 
   .side-panel-mask {
@@ -920,29 +1234,38 @@ export default defineComponent({
 
   .side-panel {
     position: fixed;
-    top: 0;
+    left: 0;
     right: 0;
     bottom: 0;
-    width: min(92vw, 420px);
+    top: auto;
+    width: 100%;
+    height: min(72dvh, 620px);
+    bottom: 0;
     z-index: 100;
-    border-left: 1px solid rgba(64, 158, 255, 0.25);
-    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
-    transform: translateX(0);
+    border-left: none;
+    border-top: 1px solid rgba(64, 158, 255, 0.25);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -4px 22px rgba(0, 0, 0, 0.3);
+    transform: translateY(0);
+
+    &.is-mobile-full {
+      height: calc(100dvh - 8px);
+    }
 
     &.is-collapsed {
-      width: min(92vw, 420px);
+      width: 100%;
       opacity: 0;
-      border-left: none;
-      transform: translateX(100%);
+      border-top: none;
+      transform: translateY(100%);
       pointer-events: none;
     }
   }
 
   .side-panel-inner {
-    width: min(92vw, 420px);
-    height: 100dvh;
+    width: 100%;
+    height: 100%;
     padding: 10px;
-    padding-top: calc(10px + env(safe-area-inset-top));
+    padding-top: 8px;
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
 
@@ -953,8 +1276,9 @@ export default defineComponent({
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
     margin: -10px -10px 10px;
-    padding: 10px;
+    padding: 8px 10px 10px;
     background: #f7fbff;
     border-bottom: 1px solid rgba(64, 158, 255, 0.15);
     font-size: 14px;
@@ -962,8 +1286,85 @@ export default defineComponent({
     color: #303133;
   }
 
+  .sheet-handle {
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    display: block;
+    width: 42px;
+    height: 4px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: #c0c4cc;
+    transform: translateX(-50%);
+  }
+
+  .mobile-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
   .drawer-divider {
     margin: 10px 0 8px;
+  }
+
+  .mobile-bottom-toolbar {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 80;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid rgba(64, 158, 255, 0.22);
+    border-radius: 12px;
+    background: rgba(18, 32, 39, 0.92);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(10px);
+  }
+
+  .mobile-tool {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    height: 52px;
+    padding: 4px 2px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #dcecff;
+    font-size: 11px;
+    line-height: 1.1;
+    touch-action: manipulation;
+
+    .el-icon {
+      margin-bottom: 3px;
+      font-size: 18px;
+    }
+
+    span {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &.active {
+      border-color: rgba(64, 158, 255, 0.55);
+      background: rgba(64, 158, 255, 0.2);
+      color: #ffffff;
+    }
+
+    &:disabled {
+      color: rgba(220, 236, 255, 0.38);
+    }
   }
 }
 </style>

@@ -1,4 +1,4 @@
-import type { Point, Segment, SegmentTrackRole } from '../types'
+﻿import type { Point, Segment, SegmentTrackRole } from '../types'
 import { calculateDistance } from './distance'
 import { pixelsToMeters, segmentPixelLength, type A4CanvasSize } from './mapScale'
 
@@ -37,7 +37,7 @@ export function segmentPathLength(points: Point[]): number {
   return segmentPixelLength(points)
 }
 
-/** 根据路径长度决定方向箭头数量（1~5） */
+/** 根据路径长度决定方向箭头数量，范围 0 到 5。 */
 export function getDirectionArrowCount(pathLengthPx: number): number {
   if (pathLengthPx < 40) return 0
   if (pathLengthPx < 120) return 1
@@ -47,7 +47,7 @@ export function getDirectionArrowCount(pathLengthPx: number): number {
   return MAX_DIRECTION_ARROWS
 }
 
-/** 折线上参数 t∈[0,1] 处的点与切线方向角 */
+/** 获取折线上参数 t 属于 [0, 1] 位置的点和切线方向角。 */
 export function getPointOnPolyline(
   points: Point[],
   t: number
@@ -176,11 +176,11 @@ export interface SegmentGroupView {
   groupIndex: number
   actual: SegmentRouteRef | null
   compares: SegmentRouteRef[]
-  /** 实际路线已结束绘制时可添加对比 */
+  /** 实际路线已经结束绘制时，可以添加对比路线。 */
   canAddCompare: boolean
 }
 
-/** 分段 → 实际 / 对比 层级视图 */
+/** 分段到实际/对比路线的层级视图。 */
 export function buildSegmentGroups(segments: Segment[]): SegmentGroupView[] {
   const groupIds = [...new Set(segments.map(s => s.groupId))]
   return groupIds.map((groupId, groupIndex) => {

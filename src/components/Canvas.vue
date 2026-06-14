@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-card class="canvas-card" shadow="hover">
     <div ref="canvasContainer" class="canvas-container">
       <canvas
@@ -28,7 +28,7 @@
       </div>
     </div>
 
-    <!-- 右键菜单 -->
+    <!-- 右键标记菜单 -->
     <el-dropdown
       ref="markerDropdown"
       :visible="markerMenuVisible"
@@ -54,7 +54,7 @@
     <!-- 标记内容输入对话框 -->
     <el-dialog
       v-model="markerDialogVisible"
-      :title="markerForm.type === 'landmark' ? '添加参照物标记' : '添加标记'"
+      :title="markerForm.type === 'landmark' ? '添加参考物标记' : '添加标记'"
       width="400px"
       :close-on-click-modal="false"
     >
@@ -81,7 +81,7 @@
 
     <template #footer>
       <el-alert
-        title="提示：拖动画布、双指缩放；绘制模式点击加点；参照物模式点击画布添加图钉标记；每段显示 1→2 前进方向"
+        title="提示：拖动画布、双指缩放；绘制模式点击加点；参考物模式点击画布添加图钉标记；每段显示 1→2 前进方向"
         type="info"
         show-icon
         :closable="false"
@@ -94,20 +94,21 @@
 import { defineComponent, ref, watch, onMounted, nextTick, onUnmounted } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import type { Segment } from '../types'
-import { getArrowPositions, DEFAULT_ACTUAL_COLOR, DEFAULT_COMPARE_COLOR } from '../utils/segment'
+import { getDirectionArrowCount, DEFAULT_ACTUAL_COLOR, DEFAULT_COMPARE_COLOR } from '../utils/segment'
+import { formatDistance, getA4CanvasSize, segmentPixelLength } from '../utils/mapScale'
 
-// 分段颜色数组，放在setup外部
+// 分段颜色数组，放在 setup 外部。
 const segmentColors = [
-  '#409EFF', // 蓝
-  '#67C23A', // 绿
-  '#E6A23C', // 橙
-  '#F56C6C', // 红
-  '#909399', // 灰
-  '#1E90FF', // 深蓝
-  '#9A60B4', // 紫
-  '#F78989', // 粉
-  '#13C2C2', // 青
-  '#FFB800' // 黄
+  '#409EFF',
+  '#67C23A',
+  '#E6A23C',
+  '#F56C6C',
+  '#909399',
+  '#1E90FF',
+  '#9A60B4',
+  '#F78989',
+  '#13C2C2',
+  '#FFB800'
 ]
 
 export default defineComponent({
@@ -119,6 +120,7 @@ export default defineComponent({
     segments: { type: Array, required: true },
     currentSegment: { type: Number, required: true },
     scale: { type: Number, required: true },
+    scaleEnabled: { type: Boolean, default: false },
     pointSizeNuber: { type: Number, required: true },
     landmarkSizeNuber: { type: Number, required: true },
     LineWidthNuber: { type: Number, required: true },
@@ -141,8 +143,7 @@ export default defineComponent({
     const isLoading = ref(false)
     const errorMessage = ref('')
     const viewScale = ref(1)
-    const offset = ref({ x: 0, y: 0 }) // 以“canvas内部坐标(屏幕像素等价)”为单位的平移
-    const viewScaleMin = 0.2
+    const offset = ref({ x: 0, y: 0 })
     const viewScaleMax = 10
     let resizeObserver: ResizeObserver | null = null
 
@@ -182,7 +183,6 @@ export default defineComponent({
       return { rect, scaleX, scaleY }
     }
 
-    // 将浏览器 clientX/clientY 转成“canvas内部像素体系下的屏幕坐标”
     function clientToCanvasScreen(clientX: number, clientY: number) {
       const m = getCanvasMetrics()
       if (!m) return { x: 0, y: 0 }
@@ -239,7 +239,7 @@ export default defineComponent({
     }
 
     let dragging = false
-    let lastPos = { x: 0, y: 0 } // 以 canvas内部“屏幕像素体系”为单位
+    let lastPos = { x: 0, y: 0 }
     let justDragged = false
     let dragTimeout: number | null = null
     let currentMarkerPosition = { x: 0, y: 0 }
@@ -249,15 +249,15 @@ export default defineComponent({
     const markerDialogVisible = ref(false)
     const markerForm = ref({ type: '', content: '' })
     const markerTypes = [
-      { type: 'landmark', label: '参照物', icon: '📌' },
+      { type: 'landmark', label: '参考物', icon: '📍' },
       { type: 'note', label: '备注', icon: '📝' },
       { type: 'photo', label: '照片', icon: '📷' },
-      { type: 'warning', label: '警告', icon: '⚠️' },
+      { type: 'warning', label: '警告', icon: '⚠' },
       { type: 'checkpoint', label: '检查点', icon: '✓' },
-      { type: 'milestone', label: '里程碑', icon: '⭐' }
+      { type: 'milestone', label: '里程碑', icon: '★' }
     ]
 
-    // 移动端触摸事件
+    // 移动端触摸事件状态
     let touchStartTime = 0
     let touchTimer: number | null = null
     let isLongPress = false
@@ -290,7 +290,6 @@ export default defineComponent({
       const realX = (x - offset.value.x) / viewScale.value
       const realY = (y - offset.value.y) / viewScale.value
 
-      // 保存当前位置并显示标记菜单
       currentMarkerPosition = { x: realX, y: realY }
       showMarkerMenu(e.clientX, e.clientY)
     }
@@ -333,7 +332,7 @@ export default defineComponent({
 
     function getMarkerTypeText(type: string) {
       const texts = {
-        landmark: '参照物',
+        landmark: '参考物',
         note: '备注',
         photo: '照片',
         warning: '警告',
@@ -347,11 +346,9 @@ export default defineComponent({
       const ctx = canvas.value?.getContext('2d')
       if (!ctx) return
 
-      // 每次重绘时先清空，避免 setTransform 后 clearRect 坐标体系混乱
+      // 每次重绘前先清空，避免坐标变换影响 clearRect。
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.clearRect(0, 0, props.width, props.height)
-
-      // 统一由 viewScale/offset 控制视口变换
       ctx.setTransform(viewScale.value, 0, 0, viewScale.value, offset.value.x, offset.value.y)
       if (props.imageSrc) {
         const img = new window.Image()
@@ -387,6 +384,117 @@ export default defineComponent({
       )
     }
 
+    function pointDistance(a: { x: number; y: number }, b: { x: number; y: number }) {
+      return Math.hypot(b.x - a.x, b.y - a.y)
+    }
+
+    function cubicBezierPoint(
+      p0: { x: number; y: number },
+      cp1: { x: number; y: number },
+      cp2: { x: number; y: number },
+      p1: { x: number; y: number },
+      t: number
+    ) {
+      const mt = 1 - t
+      return {
+        x:
+          mt * mt * mt * p0.x +
+          3 * mt * mt * t * cp1.x +
+          3 * mt * t * t * cp2.x +
+          t * t * t * p1.x,
+        y:
+          mt * mt * mt * p0.y +
+          3 * mt * mt * t * cp1.y +
+          3 * mt * t * t * cp2.y +
+          t * t * t * p1.y
+      }
+    }
+
+    function buildRenderedPathPoints(seg: Array<{ x: number; y: number; type?: 'line' | 'curve' }>) {
+      if (seg.length < 2) return [...seg]
+
+      const path: Array<{ x: number; y: number }> = [{ x: seg[0].x, y: seg[0].y }]
+      const appendPoint = (point: { x: number; y: number }) => {
+        const last = path[path.length - 1]
+        if (!last || pointDistance(last, point) > 0.01) path.push({ x: point.x, y: point.y })
+      }
+
+      let i = 1
+      while (i < seg.length) {
+        if (seg[i].type === 'curve') {
+          let j = i
+          while (j < seg.length && seg[j].type === 'curve') j++
+          const curvePoints = [seg[i - 1], ...seg.slice(i, j)]
+
+          if (curvePoints.length >= 3) {
+            for (let k = 0; k < curvePoints.length - 1; k++) {
+              const p0 = curvePoints[k - 1] || curvePoints[k]
+              const p1 = curvePoints[k]
+              const p2 = curvePoints[k + 1]
+              const p3 = curvePoints[k + 2] || p2
+              const cp1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 }
+              const cp2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 }
+              for (let step = 1; step <= 16; step++) {
+                appendPoint(cubicBezierPoint(p1, cp1, cp2, p2, step / 16))
+              }
+            }
+          } else {
+            appendPoint(curvePoints[curvePoints.length - 1])
+          }
+          i = j
+        } else {
+          appendPoint(seg[i])
+          i++
+        }
+      }
+
+      return path
+    }
+
+    function getPointOnRenderedPath(
+      path: Array<{ x: number; y: number }>,
+      t: number
+    ): { x: number; y: number; angle: number } | null {
+      if (path.length < 2) return null
+      const lengths: number[] = []
+      let total = 0
+      for (let i = 1; i < path.length; i++) {
+        const len = pointDistance(path[i - 1], path[i])
+        lengths.push(len)
+        total += len
+      }
+      if (total <= 0) return null
+
+      let target = total * t
+      for (let i = 0; i < lengths.length; i++) {
+        if (target <= lengths[i] || i === lengths.length - 1) {
+          const p0 = path[i]
+          const p1 = path[i + 1]
+          const localT = Math.min(1, target / (lengths[i] || 1))
+          return {
+            x: p0.x + (p1.x - p0.x) * localT,
+            y: p0.y + (p1.y - p0.y) * localT,
+            angle: Math.atan2(p1.y - p0.y, p1.x - p0.x)
+          }
+        }
+        target -= lengths[i]
+      }
+      return null
+    }
+
+    function getArrowPositionsForSegment(seg: Array<{ x: number; y: number; type?: 'line' | 'curve' }>) {
+      const path = buildRenderedPathPoints(seg)
+      let length = 0
+      for (let i = 1; i < path.length; i++) length += pointDistance(path[i - 1], path[i])
+      const count = getDirectionArrowCount(length)
+      const result: Array<{ x: number; y: number; angle: number }> = []
+      for (let i = 0; i < count; i++) {
+        const point = getPointOnRenderedPath(path, (i + 1) / (count + 1))
+        if (point) result.push(point)
+      }
+      return result
+    }
+
     function drawPointsAndLines(
       ctx: CanvasRenderingContext2D,
       segmentsToDraw: Segment[] = props.segments as Segment[]
@@ -399,24 +507,19 @@ export default defineComponent({
         const seg = segment.points
         let i = 1
         while (i < seg.length) {
-          // 检查连续curve段
           if (seg[i].type === 'curve') {
             let j = i
             while (j < seg.length && seg[j].type === 'curve') j++
-            // 取前一个点和连续的curve点
             const curvePoints = [seg[i - 1], ...seg.slice(i, j)]
             if (curvePoints.length >= 3) {
               drawCatmullRom(ctx, curvePoints)
-            } else if (curvePoints.length === 2) {
-              // 只有两个点时，降级为直线
-              ctx.beginPath()
+            } else if (curvePoints.length === 2) {              ctx.beginPath()
               ctx.moveTo(curvePoints[0].x, curvePoints[0].y)
               ctx.lineTo(curvePoints[1].x, curvePoints[1].y)
               ctx.stroke()
             }
             i = j
           } else {
-            // 直线段
             ctx.beginPath()
             ctx.moveTo(seg[i - 1].x, seg[i - 1].y)
             ctx.lineTo(seg[i].x, seg[i].y)
@@ -430,6 +533,7 @@ export default defineComponent({
           } else {
             drawSegmentDirectionArrow(ctx, seg, color)
           }
+          drawRouteDistanceLabel(ctx, segment, color)
         }
 
         if (!segment.finished) {
@@ -451,10 +555,7 @@ export default defineComponent({
             ctx.stroke()
             ctx.restore()
           })
-        }
-
-        // 画标记点
-        if (segment.markers) {
+        }        if (segment.markers) {
           segment.markers.forEach(marker => {
             drawMarker(ctx, marker)
           })
@@ -462,8 +563,6 @@ export default defineComponent({
         ctx.restore()
       })
     }
-
-    // 导出用：在未缩放未平移坐标系下绘制单分段，避免分段互相覆盖
     function drawSingleSegmentForExport(
       ctx: CanvasRenderingContext2D,
       segment: Segment,
@@ -504,14 +603,7 @@ export default defineComponent({
           } else {
             drawSegmentDirectionArrow(ctx, seg, color, 1)
           }
-        }
-        if (!segment.finished) {
-          seg.forEach(p => {
-            ctx.beginPath()
-            ctx.arc(p.x, p.y, props.pointSizeNuber, 0, 2 * Math.PI)
-            ctx.fillStyle = color
-            ctx.fill()
-          })
+          drawRouteDistanceLabelForExport(ctx, segment, color)
         }
         ctx.restore()
       }
@@ -574,32 +666,101 @@ export default defineComponent({
       ctx.restore()
     }
 
+    function getSegmentsCaptureRect(segments: Segment[]) {
+      const xs: number[] = []
+      const ys: number[] = []
+
+      segments.forEach(segment => {
+        segment.points.forEach(point => {
+          xs.push(point.x)
+          ys.push(point.y)
+        })
+        segment.markers?.forEach(marker => {
+          xs.push(marker.x)
+          ys.push(marker.y)
+        })
+      })
+
+      if (!xs.length || !ys.length) {
+        return { x: 0, y: 0, width: props.width, height: props.height }
+      }
+
+      const minX = Math.min(...xs)
+      const maxX = Math.max(...xs)
+      const minY = Math.min(...ys)
+      const maxY = Math.max(...ys)
+      const contentWidth = Math.max(1, maxX - minX)
+      const contentHeight = Math.max(1, maxY - minY)
+      const padding = Math.max(80, Math.min(props.width, props.height) * 0.08)
+      const width = Math.min(props.width, Math.max(contentWidth + padding * 2, 260))
+      const height = Math.min(props.height, Math.max(contentHeight + padding * 2, 220))
+      const centerX = (minX + maxX) / 2
+      const centerY = (minY + maxY) / 2
+      const x = clamp(centerX - width / 2, 0, props.width - width)
+      const y = clamp(centerY - height / 2, 0, props.height - height)
+
+      return { x, y, width, height }
+    }
+
+    function getSegmentCaptureRect(segment: Segment) {
+      return getSegmentsCaptureRect([segment])
+    }
+
+    async function drawExportBaseMap(ctx: CanvasRenderingContext2D) {
+      if (!props.imageSrc) return
+      const img = new window.Image()
+      img.src = props.imageSrc as string
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject()
+      }).catch(() => undefined)
+      if (img.complete) {
+        const { dx, dy, dw, dh } = getImageContainRect(img, props.width, props.height)
+        drawRotatedImage(ctx, img, dx, dy, dw, dh)
+      }
+    }
+
     async function captureSegmentImage(segmentIndex: number): Promise<string | null> {
       const segment = (props.segments as Segment[])[segmentIndex]
       if (!segment) return null
 
+      const crop = getSegmentCaptureRect(segment)
       const offscreen = document.createElement('canvas')
-      offscreen.width = props.width
-      offscreen.height = props.height
+      offscreen.width = Math.ceil(crop.width)
+      offscreen.height = Math.ceil(crop.height)
       const ctx = offscreen.getContext('2d')
       if (!ctx) return null
 
-      ctx.clearRect(0, 0, props.width, props.height)
+      ctx.clearRect(0, 0, offscreen.width, offscreen.height)
+      ctx.save()
+      ctx.translate(-crop.x, -crop.y)
 
-      if (props.imageSrc) {
-        const img = new window.Image()
-        img.src = props.imageSrc as string
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve()
-          img.onerror = () => reject()
-        }).catch(() => undefined)
-        if (img.complete) {
-          const { dx, dy, dw, dh } = getImageContainRect(img, props.width, props.height)
-          drawRotatedImage(ctx, img, dx, dy, dw, dh)
-        }
-      }
-
+      await drawExportBaseMap(ctx)
       drawSingleSegmentForExport(ctx, segment, segmentIndex)
+      ctx.restore()
+      return offscreen.toDataURL('image/png')
+    }
+
+    async function captureSegmentGroupImage(groupId: string): Promise<string | null> {
+      const segments = (props.segments as Segment[]).filter(segment => segment.groupId === groupId)
+      if (!segments.length) return null
+
+      const crop = getSegmentsCaptureRect(segments)
+      const offscreen = document.createElement('canvas')
+      offscreen.width = Math.ceil(crop.width)
+      offscreen.height = Math.ceil(crop.height)
+      const ctx = offscreen.getContext('2d')
+      if (!ctx) return null
+
+      ctx.clearRect(0, 0, offscreen.width, offscreen.height)
+      ctx.save()
+      ctx.translate(-crop.x, -crop.y)
+      await drawExportBaseMap(ctx)
+      segments.forEach(segment => {
+        const index = (props.segments as Segment[]).findIndex(item => item.id === segment.id)
+        drawSingleSegmentForExport(ctx, segment, index)
+      })
+      ctx.restore()
       return offscreen.toDataURL('image/png')
     }
 
@@ -632,10 +793,7 @@ export default defineComponent({
       ctx.closePath()
       ctx.fill()
       ctx.restore()
-    }
-
-    /** 绘制中：点1→点2 单箭头 */
-    function drawSegmentDirectionArrow(
+    }    function drawSegmentDirectionArrow(
       ctx: CanvasRenderingContext2D,
       seg: Array<{ x: number; y: number }>,
       color: string,
@@ -648,24 +806,96 @@ export default defineComponent({
       const len = Math.hypot(dx, dy)
       if (len < 2) return
       const angle = Math.atan2(dy, dx)
-      const t = getArrowPositions(seg)[0] || { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2, angle }
+      const t = getArrowPositionsForSegment(seg)[0] || { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2, angle }
       drawArrowAt(ctx, t.x, t.y, t.angle ?? angle, color, scale)
-    }
-
-    /** 已结束分段：沿路径分布最多 5 个方向箭头 */
-    function drawArrowsAlongPath(
+    }    function drawArrowsAlongPath(
       ctx: CanvasRenderingContext2D,
       seg: Array<{ x: number; y: number }>,
       color: string,
       scale = 1 / viewScale.value
     ) {
-      getArrowPositions(seg).forEach(pos => drawArrowAt(ctx, pos.x, pos.y, pos.angle, color, scale))
+      getArrowPositionsForSegment(seg).forEach(pos => drawArrowAt(ctx, pos.x, pos.y, pos.angle, color, scale))
+    }    function getRouteDistanceText(segment: Segment): string {
+      const canvasSize = getA4CanvasSize(props.orientation as 'landscape' | 'portrait')
+      const formatted = formatDistance(
+        segmentPixelLength(segment.points),
+        props.scaleEnabled,
+        props.scale,
+        canvasSize
+      )
+      return `${formatted.value} ${formatted.unit}`
     }
 
-    // Catmull-Rom样条转三次贝塞尔
+    function getRouteLabelPoint(points: Array<{ x: number; y: number }>) {
+      if (points.length < 2) return null
+      return getPointOnRenderedPath(buildRenderedPathPoints(points), 0.5)
+    }
+
+    function drawDistancePill(
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      text: string,
+      color: string,
+      scale = 1
+    ) {
+      const fontSize = 12 * scale
+      const padX = 7 * scale
+      const padY = 4 * scale
+      const gap = 12 * scale
+      ctx.save()
+      ctx.font = `600 ${fontSize}px "Microsoft YaHei", Arial`
+      const width = ctx.measureText(text).width + padX * 2
+      const height = fontSize + padY * 2
+      const bx = x - width / 2
+      const by = y - gap - height
+      ctx.globalAlpha = 0.88
+      ctx.fillStyle = color
+      roundRect(ctx, bx, by, width, height, 4 * scale)
+      ctx.fill()
+      ctx.globalAlpha = 1
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = Math.max(1, scale)
+      ctx.stroke()
+      ctx.fillStyle = '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(text, x, by + height / 2)
+      ctx.restore()
+    }
+
+    function drawRouteDistanceLabel(
+      ctx: CanvasRenderingContext2D,
+      segment: Segment,
+      color: string
+    ) {
+      const point = getRouteLabelPoint(segment.points)
+      if (!point) return
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      drawDistancePill(
+        ctx,
+        point.x * viewScale.value + offset.value.x,
+        point.y * viewScale.value + offset.value.y,
+        getRouteDistanceText(segment),
+        color
+      )
+      ctx.restore()
+    }
+
+    function drawRouteDistanceLabelForExport(
+      ctx: CanvasRenderingContext2D,
+      segment: Segment,
+      color: string
+    ) {
+      const point = getRouteLabelPoint(segment.points)
+      if (!point) return
+      drawDistancePill(ctx, point.x, point.y, getRouteDistanceText(segment), color, 1.15)
+    }
+
     function drawCatmullRom(ctx, points) {
       ctx.save()
-      ctx.lineWidth = props.LineWidthNuber / viewScale.value // 线宽固定为2像素
+      ctx.lineWidth = props.LineWidthNuber / viewScale.value
       ctx.beginPath()
       ctx.moveTo(points[0].x, points[0].y)
       for (let i = 0; i < points.length - 1; i++) {
@@ -682,8 +912,6 @@ export default defineComponent({
       ctx.stroke()
       ctx.restore()
     }
-
-    // 绘制标记点
     function drawMarker(
       ctx: CanvasRenderingContext2D,
       marker: { x: number; y: number; type: string; content: string }
@@ -720,9 +948,9 @@ export default defineComponent({
         const icons = {
           note: '📝',
           photo: '📷',
-          warning: '⚠️',
+          warning: '⚠',
           checkpoint: '✓',
-          milestone: '⭐'
+          milestone: '★'
         }
         const icon = icons[marker.type as keyof typeof icons] || '📍'
         ctx.fillStyle = '#fff'
@@ -828,10 +1056,7 @@ export default defineComponent({
     function drawAll() {
       requestAnimationFrame(draw)
     }
-
-    // 拖拽与缩放
     function onMouseDown(e: MouseEvent) {
-      console.log('Mouse down:', e.clientX, e.clientY)
       dragging = true
       justDragged = false
       pinchActive = false
@@ -840,17 +1065,15 @@ export default defineComponent({
 
     function onMouseMove(e: MouseEvent) {
       if (!dragging) return
-      console.log('Mouse move:', e.clientX, e.clientY, 'dragging:', dragging)
       justDragged = true
       const p = clientToCanvasScreen(e.clientX, e.clientY)
       offset.value.x += p.x - lastPos.x
       offset.value.y += p.y - lastPos.y
       lastPos = p
-      drawAll() // 拖动时立即重绘
+      drawAll()
     }
 
     function onMouseUp(e: MouseEvent) {
-      console.log('Mouse up')
       dragging = false
       if (dragTimeout) clearTimeout(dragTimeout)
       dragTimeout = window.setTimeout(() => {
@@ -863,8 +1086,6 @@ export default defineComponent({
 
       const scaleDelta = e.deltaY < 0 ? 1.1 : 0.9
       const { x: cursorScreenX, y: cursorScreenY } = clientToCanvasScreen(e.clientX, e.clientY)
-
-      // 以光标位置为缩放中心：让缩放前后该点的“逻辑坐标”保持不变
       const logicalX = (cursorScreenX - offset.value.x) / viewScale.value
       const logicalY = (cursorScreenY - offset.value.y) / viewScale.value
 
@@ -875,39 +1096,34 @@ export default defineComponent({
       if (dragTimeout) clearTimeout(dragTimeout)
       drawAll()
     }
-
-    // 移动端触摸事件
     function onTouchStart(e: TouchEvent) {
       e.preventDefault()
       touchStartTime = Date.now()
       isLongPress = false
       pinchActive = false
+
       if (e.touches.length === 1) {
-        // 单指触摸
         if (props.drawing) {
-          // 长按检测
           touchTimer = window.setTimeout(() => {
             isLongPress = true
             const touch = e.touches[0]
             const { x, y } = clientToCanvasScreen(touch.clientX, touch.clientY)
             const realX = (x - offset.value.x) / viewScale.value
             const realY = (y - offset.value.y) / viewScale.value
-
             currentMarkerPosition = { x: realX, y: realY }
             showMarkerMenu(touch.clientX, touch.clientY)
-          }, 500) // 500ms长按
+          }, 500)
         }
 
-        // 拖拽检测
         dragging = true
         const touch = e.touches[0]
         justDragged = false
         lastPos = clientToCanvasScreen(touch.clientX, touch.clientY)
       }
+
       if (e.touches.length === 2) {
-        // 双指捏合缩放
         dragging = false
-        justDragged = true // 避免松手时误触发“添加点”
+        justDragged = true
         isLongPress = false
         if (touchTimer) clearTimeout(touchTimer)
         touchTimer = null
@@ -936,7 +1152,6 @@ export default defineComponent({
         const t2 = e.touches[1]
         const p1 = clientToCanvasScreen(t1.clientX, t1.clientY)
         const p2 = clientToCanvasScreen(t2.clientX, t2.clientY)
-
         const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
         if (!pinchStartDistance) return
 
@@ -945,34 +1160,28 @@ export default defineComponent({
           viewScaleMin,
           viewScaleMax
         )
-
         const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
         offset.value.x = center.x - pinchAnchorLogical.x * nextScale
         offset.value.y = center.y - pinchAnchorLogical.y * nextScale
         viewScale.value = nextScale
-
         drawAll()
         return
       }
 
       if (!dragging || e.touches.length !== 1) return
-
       const touch = e.touches[0]
       const p = clientToCanvasScreen(touch.clientX, touch.clientY)
       const moveDistance = Math.hypot(p.x - lastPos.x, p.y - lastPos.y)
-
-      // 如果移动距离超过阈值，取消长按
       if (moveDistance > 10 && touchTimer) {
         clearTimeout(touchTimer)
         touchTimer = null
         isLongPress = false
       }
-
       justDragged = true
       offset.value.x += p.x - lastPos.x
       offset.value.y += p.y - lastPos.y
       lastPos = p
-      drawAll() // 拖动时立即重绘
+      drawAll()
     }
 
     function onTouchEnd(e: TouchEvent) {
@@ -980,13 +1189,11 @@ export default defineComponent({
       const wasPinching = pinchActive
       pinchActive = false
 
-      // 清理长按定时器
       if (touchTimer) {
         clearTimeout(touchTimer)
         touchTimer = null
       }
 
-      // 如果不是长按且没有拖拽，则添加点位
       if (!wasPinching && !isLongPress && !justDragged && e.changedTouches.length === 1) {
         const touch = e.changedTouches[0]
         const { x, y } = clientToCanvasScreen(touch.clientX, touch.clientY)
@@ -1050,16 +1257,11 @@ export default defineComponent({
           updateCanvasDisplaySize()
         })
         resizeObserver.observe(canvasContainer.value)
-      }
-
-      // 添加全局鼠标事件监听器，确保拖拽功能正常工作
-      document.addEventListener('mousemove', onMouseMove)
+      }      document.addEventListener('mousemove', onMouseMove)
       document.addEventListener('mouseup', onMouseUp)
     })
 
-    onUnmounted(() => {
-      // 清理全局鼠标和容器尺寸监听器
-      document.removeEventListener('mousemove', onMouseMove)
+    onUnmounted(() => {      document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', onMouseUp)
       resizeObserver?.disconnect()
       resizeObserver = null
@@ -1091,7 +1293,8 @@ export default defineComponent({
       onMarkerMenuVisibleChange,
       getMarkerTypeColor,
       getMarkerTypeText,
-      captureSegmentImage
+      captureSegmentImage,
+      captureSegmentGroupImage
     }
   }
 })
@@ -1178,3 +1381,8 @@ export default defineComponent({
   }
 }
 </style>
+
+
+
+
+

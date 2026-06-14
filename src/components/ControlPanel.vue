@@ -1,32 +1,32 @@
-<template>
+﻿<template>
   <div class="control-panel">
     <div v-if="!hideActions" class="panel-actions-grid">
       <el-button
         :type="drawing ? 'warning' : 'success'"
-        @click="$emit('toggle-drawing')"
         class="grid-btn"
+        @click="$emit('toggle-drawing')"
       >
         <el-icon><Edit /></el-icon>
         <span>{{ drawing ? '结束绘制' : '开始绘制' }}</span>
       </el-button>
 
-      <el-popconfirm title="确定要清除所有点位吗？" @confirm="$emit('clear-points')">
+      <el-popconfirm title="确定要清空所有轨迹吗？" @confirm="$emit('clear-points')">
         <template #reference>
           <el-button type="danger" class="grid-btn">
             <el-icon><Delete /></el-icon>
-            <span>清除</span>
+            <span>清空</span>
           </el-button>
         </template>
       </el-popconfirm>
 
       <el-button type="info" class="grid-btn" @click="$emit('upload-image')">
         <el-icon><Picture /></el-icon>
-        <span>插图</span>
+        <span>插入图片</span>
       </el-button>
 
       <el-button type="warning" class="grid-btn" @click="$emit('toggle-orientation')">
         <el-icon><Refresh /></el-icon>
-        <span>旋转</span>
+        <span>旋转地图</span>
       </el-button>
 
       <el-button class="grid-btn" @click="$emit('toggle-draw-mode')">
@@ -40,7 +40,7 @@
         @click="$emit('toggle-landmark-mode')"
       >
         <el-icon><LocationFilled /></el-icon>
-        <span>{{ landmarkMode ? '图钉中' : '参照物' }}</span>
+        <span>{{ landmarkMode ? '图钉中' : '参考物' }}</span>
       </el-button>
     </div>
 
@@ -117,112 +117,112 @@
 
     <el-collapse v-model="activeCollapse" class="param-collapse">
       <el-collapse-item name="params" title="参数设置">
-    <div v-if="activeSegment" class="color-panel">
-      <el-form-item
-        :label="activeSegment.trackRole === 'compare' ? '对比路线颜色' : '实际路线颜色'"
-        class="color-form-item"
-      >
-        <el-color-picker
-          :model-value="activeSegment.color"
-          @update:model-value="$emit('update-segment-color', currentSegment, $event)"
-          size="small"
-        />
-        <el-button
-          v-for="preset in colorPresets"
-          :key="preset"
-          size="small"
-          circle
-          class="color-preset"
-          :style="{ background: preset }"
-          @click="$emit('update-segment-color', currentSegment, preset)"
-        />
-      </el-form-item>
-    </div>
-
-    <el-form class="panel-form" label-position="top">
-      <div class="form-row">
-        <el-form-item label="比例尺换算" class="form-item-compact">
-          <el-switch v-model="scaleEnabledProxy" active-text="开" inactive-text="关" />
-        </el-form-item>
-        <el-form-item
-          v-if="scaleEnabledProxy"
-          label="地图比例 1:N"
-          class="form-item-compact form-item-grow"
-        >
-          <div class="scale-input-row">
-            <el-select v-model="mapScaleProxy" size="small" style="flex: 1">
-              <el-option v-for="n in mapScalePresets" :key="n" :label="`1 : ${n}`" :value="n" />
-            </el-select>
-            <el-input-number
-              v-model="mapScaleProxy"
-              :min="100"
-              :max="100000"
-              :step="500"
+        <div v-if="activeSegment" class="color-panel">
+          <el-form-item
+            :label="activeSegment.trackRole === 'compare' ? '对比路线颜色' : '实际路线颜色'"
+            class="color-form-item"
+          >
+            <el-color-picker
+              :model-value="activeSegment.color"
               size="small"
-              controls-position="right"
-              style="width: 110px"
+              @update:model-value="$emit('update-segment-color', currentSegment, $event)"
             />
+            <el-button
+              v-for="preset in colorPresets"
+              :key="preset"
+              size="small"
+              circle
+              class="color-preset"
+              :style="{ background: preset }"
+              @click="$emit('update-segment-color', currentSegment, preset)"
+            />
+          </el-form-item>
+        </div>
+
+        <el-form class="panel-form" label-position="top">
+          <div class="form-row">
+            <el-form-item label="比例尺换算" class="form-item-compact">
+              <el-switch v-model="scaleEnabledProxy" active-text="开" inactive-text="关" />
+            </el-form-item>
+            <el-form-item
+              v-if="scaleEnabledProxy"
+              label="地图比例 1:N"
+              class="form-item-compact form-item-grow"
+            >
+              <div class="scale-input-row">
+                <el-select v-model="mapScaleProxy" size="small" style="flex: 1">
+                  <el-option v-for="n in mapScalePresets" :key="n" :label="`1 : ${n}`" :value="n" />
+                </el-select>
+                <el-input-number
+                  v-model="mapScaleProxy"
+                  :min="100"
+                  :max="100000"
+                  :step="500"
+                  size="small"
+                  controls-position="right"
+                  style="width: 110px"
+                />
+              </div>
+            </el-form-item>
           </div>
-        </el-form-item>
-      </div>
-      <div class="form-row form-row-nums">
-        <el-form-item label="画点" class="form-item-compact">
-          <el-input-number
-            :model-value="pointSize"
-            @update:model-value="$emit('update:pointSize', $event)"
-            :min="6"
-            :step="1"
-            size="small"
-            controls-position="right"
-          />
-        </el-form-item>
-        <el-form-item label="连线" class="form-item-compact">
-          <el-input-number
-            :model-value="lineWidth"
-            @update:model-value="$emit('update:lineWidth', $event)"
-            :min="6"
-            :step="1"
-            size="small"
-            controls-position="right"
-          />
-        </el-form-item>
-        <el-form-item label="图钉" class="form-item-compact">
-          <el-input-number
-            :model-value="landmarkSize"
-            @update:model-value="$emit('update:landmarkSize', $event)"
-            :min="40"
-            :max="400"
-            :step="1"
-            size="small"
-            controls-position="right"
-          />
-        </el-form-item>
-        <el-form-item label="箭头" class="form-item-compact">
-          <el-input-number
-            :model-value="arrowSize"
-            @update:model-value="$emit('update:arrowSize', $event)"
-            :min="1"
-            :max="10"
-            :step="1"
-            size="small"
-            controls-position="right"
-          />
-        </el-form-item>
-      </div>
-      <div class="form-row">
-        <el-form-item label="标签透明度" class="form-item-compact form-item-grow">
-          <el-slider
-            :model-value="markerOpacity"
-            @update:model-value="$emit('update:markerOpacity', $event)"
-            :min="0.1"
-            :max="1"
-            :step="0.1"
-            :show-tooltip="true"
-            size="small"
-          />
-        </el-form-item>
-      </div>
-    </el-form>
+          <div class="form-row form-row-nums">
+            <el-form-item label="画点" class="form-item-compact">
+              <el-input-number
+                :model-value="pointSize"
+                :min="6"
+                :step="1"
+                size="small"
+                controls-position="right"
+                @update:model-value="$emit('update:pointSize', $event)"
+              />
+            </el-form-item>
+            <el-form-item label="连线" class="form-item-compact">
+              <el-input-number
+                :model-value="lineWidth"
+                :min="6"
+                :step="1"
+                size="small"
+                controls-position="right"
+                @update:model-value="$emit('update:lineWidth', $event)"
+              />
+            </el-form-item>
+            <el-form-item label="图钉" class="form-item-compact">
+              <el-input-number
+                :model-value="landmarkSize"
+                :min="40"
+                :max="400"
+                :step="1"
+                size="small"
+                controls-position="right"
+                @update:model-value="$emit('update:landmarkSize', $event)"
+              />
+            </el-form-item>
+            <el-form-item label="箭头" class="form-item-compact">
+              <el-input-number
+                :model-value="arrowSize"
+                :min="1"
+                :max="10"
+                :step="1"
+                size="small"
+                controls-position="right"
+                @update:model-value="$emit('update:arrowSize', $event)"
+              />
+            </el-form-item>
+          </div>
+          <div class="form-row">
+            <el-form-item label="标签透明度" class="form-item-compact form-item-grow">
+              <el-slider
+                :model-value="markerOpacity"
+                :min="0.1"
+                :max="1"
+                :step="0.1"
+                :show-tooltip="true"
+                size="small"
+                @update:model-value="$emit('update:markerOpacity', $event)"
+              />
+            </el-form-item>
+          </div>
+        </el-form>
       </el-collapse-item>
     </el-collapse>
   </div>
@@ -334,6 +334,7 @@ export default defineComponent({
       }
       emit('remove-segment', segment.id)
     }
+
     const activeSegment = computed(
       () =>
         props.segmentGroups
