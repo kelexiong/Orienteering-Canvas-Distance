@@ -115,8 +115,24 @@
       </div>
     </div>
 
-    <el-collapse v-model="activeCollapse" class="param-collapse">
-      <el-collapse-item name="params" title="参数设置">
+    <el-collapse
+      v-model="activeCollapse"
+      class="param-collapse"
+      :class="{ 'is-open': activeCollapse.includes('params') }"
+    >
+      <el-collapse-item name="params">
+        <template #title>
+          <div class="collapse-title-row">
+            <span class="collapse-title">参数设置</span>
+            <el-tag
+              size="small"
+              :type="activeCollapse.includes('params') ? 'primary' : 'info'"
+              effect="plain"
+            >
+              {{ activeCollapse.includes('params') ? '已展开' : '点击展开' }}
+            </el-tag>
+          </div>
+        </template>
         <div v-if="activeSegment" class="color-panel">
           <el-form-item
             :label="activeSegment.trackRole === 'compare' ? '对比路线颜色' : '实际路线颜色'"
@@ -125,7 +141,7 @@
             <el-color-picker
               :model-value="activeSegment.color"
               size="small"
-              @update:model-value="$emit('update-segment-color', currentSegment, $event)"
+              @update:model-value="updateRouteColor"
             />
             <el-button
               v-for="preset in colorPresets"
@@ -133,8 +149,11 @@
               size="small"
               circle
               class="color-preset"
+              :class="{
+                'is-selected': activeSegment.color?.toLowerCase() === preset.toLowerCase()
+              }"
               :style="{ background: preset }"
-              @click="$emit('update-segment-color', currentSegment, preset)"
+              @click="updateRouteColor(preset)"
             />
           </el-form-item>
         </div>
@@ -189,8 +208,8 @@
             <el-form-item label="图钉" class="form-item-compact">
               <el-input-number
                 :model-value="landmarkSize"
-                :min="40"
-                :max="400"
+                :min="12"
+                :max="96"
                 :step="1"
                 size="small"
                 controls-position="right"
@@ -210,7 +229,18 @@
             </el-form-item>
           </div>
           <div class="form-row">
-            <el-form-item label="标签透明度" class="form-item-compact form-item-grow">
+            <el-form-item label="轨迹透明度" class="form-item-compact form-item-grow">
+              <el-slider
+                :model-value="trackOpacity"
+                :min="0.1"
+                :max="1"
+                :step="0.1"
+                :show-tooltip="true"
+                size="small"
+                @update:model-value="$emit('update:trackOpacity', $event)"
+              />
+            </el-form-item>
+            <el-form-item label="参照物图钉透明度" class="form-item-compact form-item-grow">
               <el-slider
                 :model-value="markerOpacity"
                 :min="0.1"
@@ -219,6 +249,17 @@
                 :show-tooltip="true"
                 size="small"
                 @update:model-value="$emit('update:markerOpacity', $event)"
+              />
+            </el-form-item>
+            <el-form-item label="路线距离透明度" class="form-item-compact form-item-grow">
+              <el-slider
+                :model-value="routeDistanceOpacity"
+                :min="0.1"
+                :max="1"
+                :step="0.1"
+                :show-tooltip="true"
+                size="small"
+                @update:model-value="$emit('update:routeDistanceOpacity', $event)"
               />
             </el-form-item>
           </div>
@@ -252,7 +293,9 @@ export default defineComponent({
     lineWidth: { type: Number, required: true },
     landmarkSize: { type: Number, required: true },
     arrowSize: { type: Number, default: 1 },
+    trackOpacity: { type: Number, default: 1 },
     markerOpacity: { type: Number, default: 0.7 },
+    routeDistanceOpacity: { type: Number, default: 0.88 },
     hideActions: { type: Boolean, default: false }
   },
   emits: [
@@ -274,7 +317,9 @@ export default defineComponent({
     'update:lineWidth',
     'update:landmarkSize',
     'update:arrowSize',
-    'update:markerOpacity'
+    'update:trackOpacity',
+    'update:markerOpacity',
+    'update:routeDistanceOpacity'
   ],
   setup(props, { emit }) {
     const mapScalePresets = MAP_SCALE_PRESETS
@@ -356,8 +401,30 @@ export default defineComponent({
 
     const colorPresets = computed(() =>
       activeSegment.value?.trackRole === 'compare'
-        ? ['#E6A23C', '#F56C6C', '#9A60B4', '#67C23A', '#909399']
-        : ['#409EFF', '#67C23A', '#1E90FF', '#13C2C2', '#F56C6C']
+        ? [
+            '#E6A23C',
+            '#F56C6C',
+            '#9A60B4',
+            '#67C23A',
+            '#13C2C2',
+            '#F97316',
+            '#D946EF',
+            '#2F54EB',
+            '#8C6D1F',
+            '#606266'
+          ]
+        : [
+            '#409EFF',
+            '#67C23A',
+            '#1E90FF',
+            '#13C2C2',
+            '#F56C6C',
+            '#00A870',
+            '#D81E5B',
+            '#8B5CF6',
+            '#2F54EB',
+            '#303133'
+          ]
     )
 
     const scaleEnabledProxy = computed({
@@ -368,6 +435,17 @@ export default defineComponent({
       get: () => props.mapScaleDenominator,
       set: (v: number) => emit('update:mapScaleDenominator', v)
     })
+
+    const normalizeColor = (value: string | null | undefined) => {
+      const color = typeof value === 'string' ? value.trim() : ''
+      return color || null
+    }
+
+    const updateRouteColor = (value: string | null | undefined) => {
+      const color = normalizeColor(value)
+      if (!color || !activeSegment.value) return
+      emit('update-segment-color', props.currentSegment, color)
+    }
 
     return {
       mapScalePresets,
@@ -384,7 +462,8 @@ export default defineComponent({
       onDragOver,
       onDrop,
       onDragEnd,
-      onRemoveCompare
+      onRemoveCompare,
+      updateRouteColor
     }
   }
 })
@@ -396,22 +475,57 @@ export default defineComponent({
 }
 
 .param-collapse {
-  border: none;
+  margin-top: 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  background: #fafafa;
+  overflow: hidden;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    box-shadow 0.2s;
+
+  &.is-open {
+    border-color: #409eff;
+    background: #f0f7ff;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.12);
+  }
+
   :deep(.el-collapse-item__header) {
     font-size: 12px;
     font-weight: 600;
-    color: #606266;
-    height: 32px;
-    line-height: 32px;
+    color: #303133;
+    height: 38px;
+    line-height: 38px;
+    padding: 0 10px;
     background: transparent;
+    border-bottom: none;
+  }
+  :deep(.el-collapse-item__arrow) {
+    color: #409eff;
+    font-weight: 700;
   }
   :deep(.el-collapse-item__wrap) {
     border: none;
     background: transparent;
   }
   :deep(.el-collapse-item__content) {
-    padding-bottom: 4px;
+    padding: 0 10px 8px;
   }
+}
+
+.collapse-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.collapse-title {
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .panel-actions-grid {
@@ -562,6 +676,12 @@ export default defineComponent({
   padding: 0 !important;
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px #dcdfe6;
+
+  &.is-selected {
+    box-shadow:
+      0 0 0 2px #303133,
+      0 0 0 4px #fff;
+  }
 }
 
 .panel-form {

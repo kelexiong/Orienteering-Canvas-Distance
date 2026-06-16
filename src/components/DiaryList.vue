@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <el-card class="diary-card animate__animated animate__fadeInUp" shadow="hover">
     <template #header>
       <div class="diary-header">
@@ -40,26 +40,26 @@
       {{ segment.trackRole === 'compare' ? '对比路线' : '实际跑动' }}
     </el-tag>
 
-    <div v-if="groupCompare" class="group-compare-box">
+    <div v-if="groupCompare && groupCompareActual" class="group-compare-box">
       <h4 class="section-title">
         <el-icon><DataAnalysis /></el-icon>
         本组路线对比
       </h4>
       <div class="compare-actual">
-        <span class="color-dot" :style="{ background: groupCompare.actual.segment.color }" />
-        <strong>{{ groupCompare.actual.roleLabel }}</strong>
-        <span>{{ formatLen(groupCompare.actual.meters) }}</span>
+        <span class="color-dot" :style="{ background: groupCompareActual.segment.color }" />
+        <strong>{{ groupCompareActual.roleLabel }}</strong>
+        <span>{{ formatLen(groupCompareActual.meters) }}</span>
       </div>
       <div v-for="row in groupCompare.compares" :key="row.segment.id" class="compare-row">
         <span class="color-dot" :style="{ background: row.segment.color }" />
         <span>{{ row.roleLabel }}</span>
         <span>{{ formatLen(row.meters) }}</span>
         <el-tag
-          v-if="groupCompare.actual.meters > 0"
+          v-if="groupCompareActual.meters > 0"
           size="small"
-          :type="row.meters > groupCompare.actual.meters ? 'danger' : 'success'"
+          :type="row.meters > groupCompareActual.meters ? 'danger' : 'success'"
         >
-          {{ diffPercent(row.meters, groupCompare.actual.meters) }}
+          {{ diffPercent(row.meters, groupCompareActual.meters) }}
         </el-tag>
       </div>
       <el-empty
@@ -105,7 +105,9 @@
         >
           <div class="point-record-main">
             <el-tag size="small" type="primary" effect="dark">{{ index + 1 }}</el-tag>
-            <el-tag size="small" type="info">({{ point.x.toFixed(0) }}, {{ point.y.toFixed(0) }})</el-tag>
+            <el-tag size="small" type="info"
+              >({{ point.x.toFixed(0) }}, {{ point.y.toFixed(0) }})</el-tag
+            >
             <el-tag
               v-if="point.type"
               size="small"
@@ -118,10 +120,20 @@
             </el-text>
           </div>
           <div class="point-record-actions">
-            <el-button size="small" text type="primary" @click="$emit('edit-point-mode', segmentIndex, index)">
+            <el-button
+              size="small"
+              text
+              type="primary"
+              @click="$emit('edit-point-mode', segmentIndex, index)"
+            >
               编辑
             </el-button>
-            <el-button size="small" text type="danger" @click="$emit('remove-point', segmentIndex, index)">
+            <el-button
+              size="small"
+              text
+              type="danger"
+              @click="$emit('remove-point', segmentIndex, index)"
+            >
               删除
             </el-button>
             <el-dropdown trigger="click" @command="(cmd: string) => onPointMore(cmd, index)">
@@ -175,9 +187,11 @@
 
       <div v-if="markers.length > 0" class="markers-list">
         <div v-for="marker in markers" :key="marker.id" class="marker-record-row">
-          <span class="pin-icon">📍</span>
+          <span class="pin-icon">{{ getMarkerIcon(marker.type) }}</span>
           <div class="marker-record-body">
-            <el-tag type="warning" size="small">参考物</el-tag>
+            <el-tag :type="getMarkerTagType(marker.type)" size="small">
+              {{ getMarkerTypeText(marker.type) }}
+            </el-tag>
             <span v-if="markerEditId !== marker.id" class="marker-text">
               {{ marker.content || '（无描述）' }}
             </span>
@@ -284,6 +298,7 @@ export default defineComponent({
         props.scaleEnabled
       )
     )
+    const groupCompareActual = computed(() => groupCompare.value?.actual || null)
 
     const formatPointDistance = (a: Point, b: Point) => {
       const px = calculateDistance(a, b)
@@ -330,6 +345,48 @@ export default defineComponent({
 
     const formatTime = (timestamp: Date) =>
       new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+
+    const getMarkerTypeText = (type: string) => {
+      const texts: Record<string, string> = {
+        landmark: '参照物',
+        flag: '旗杆',
+        target: '目标点',
+        note: '备注',
+        // photo: '照片',
+        // warning: '警告',
+        checkpoint: '检查点'
+        // milestone: '里程碑'
+      }
+      return texts[type] || '标记'
+    }
+
+    const getMarkerTagType = (type: string) => {
+      const types: Record<string, 'primary' | 'success' | 'warning' | 'danger' | 'info'> = {
+        landmark: 'warning',
+        flag: 'success',
+        target: 'primary',
+        note: 'info',
+        photo: 'success',
+        warning: 'danger',
+        checkpoint: 'warning',
+        milestone: 'primary'
+      }
+      return types[type] || 'info'
+    }
+
+    const getMarkerIcon = (type: string) => {
+      const icons: Record<string, string> = {
+        landmark: '📍',
+        flag: '⚑',
+        target: '◎',
+        note: 'i',
+        photo: 'P',
+        warning: '!',
+        checkpoint: '✓',
+        milestone: '★'
+      }
+      return icons[type] || '📍'
+    }
 
     const removeMarker = (markerId: string) => {
       emit('remove-marker', props.segmentIndex, markerId)
@@ -380,8 +437,8 @@ export default defineComponent({
         await exportSegments(
           props.allSegments.filter(segment => segment.groupId === props.segment.groupId)
         )
-      }
-      else if (command === 'all-segments') await exportSegments(props.allSegments || [props.segment])
+      } else if (command === 'all-segments')
+        await exportSegments(props.allSegments || [props.segment])
     }
 
     watch(
@@ -397,6 +454,7 @@ export default defineComponent({
       markerEditId,
       markerEditText,
       groupCompare,
+      groupCompareActual,
       formatPointDistance,
       currentSegmentLengthText,
       formatLen,
@@ -406,6 +464,9 @@ export default defineComponent({
       startEditMarker,
       saveMarkerDesc,
       formatTime,
+      getMarkerTypeText,
+      getMarkerTagType,
+      getMarkerIcon,
       removeMarker,
       handleExportCommand
     }

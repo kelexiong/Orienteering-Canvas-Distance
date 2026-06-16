@@ -44,7 +44,9 @@
             :key="markerType.type"
             @click="selectMarkerType(markerType)"
           >
-            <span style="margin-right: 8px">{{ markerType.icon }}</span>
+            <el-icon class="marker-menu-icon">
+              <component :is="markerType.icon" />
+            </el-icon>
             {{ markerType.label }}
           </el-dropdown-item>
         </el-dropdown-menu>
@@ -54,15 +56,47 @@
     <!-- 标记内容输入对话框 -->
     <el-dialog
       v-model="markerDialogVisible"
-      :title="markerForm.type === 'landmark' ? '添加参考物标记' : '添加标记'"
+      :title="`添加${getMarkerTypeText(markerForm.type)}标记`"
       width="400px"
       :close-on-click-modal="false"
     >
       <el-form :model="markerForm" label-width="80px">
-        <el-form-item label="标记类型">
-          <el-tag :type="getMarkerTypeColor(markerForm.type)" size="large">
-            {{ getMarkerTypeText(markerForm.type) }}
-          </el-tag>
+        <el-form-item label="图钉样式">
+          <el-radio-group
+            v-model="markerForm.type"
+            class="marker-style-group"
+            @change="onMarkerTypeChange"
+          >
+            <el-radio-button
+              v-for="markerType in markerTypes"
+              :key="markerType.type"
+              :label="markerType.type"
+            >
+              <span class="marker-style-option">
+                <el-icon>
+                  <component :is="markerType.icon" />
+                </el-icon>
+                {{ markerType.label }}
+              </span>
+            </el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="图钉颜色">
+          <div class="marker-color-row">
+            <el-color-picker
+              :model-value="markerForm.color"
+              size="small"
+              @update:model-value="updateMarkerColor"
+            />
+            <span
+              v-for="preset in markerColorPresets"
+              :key="preset"
+              class="marker-color-preset"
+              :class="{ 'is-selected': markerForm.color.toLowerCase() === preset.toLowerCase() }"
+              :style="{ background: preset }"
+              @click="updateMarkerColor(preset)"
+            ></span>
+          </div>
         </el-form-item>
         <el-form-item label="标记内容">
           <el-input
@@ -81,7 +115,7 @@
 
     <template #footer>
       <el-alert
-        title="提示：拖动画布、双指缩放；绘制模式点击加点；参考物模式点击画布添加图钉标记；每段显示 1→2 前进方向"
+        title="提示：拖动画布、双指缩放；绘制模式点击加点；参考物模式点击画布后选择图钉样式；每段显示 1→2 前进方向"
         type="info"
         show-icon
         :closable="false"
@@ -91,8 +125,18 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, watch, onMounted, nextTick, onUnmounted } from 'vue'
-import { Loading } from '@element-plus/icons-vue'
+import { defineComponent, ref, watch, onMounted, nextTick, onUnmounted, type Component } from 'vue'
+import {
+  Loading,
+  LocationFilled,
+  Memo,
+  PictureFilled,
+  WarningFilled,
+  CircleCheckFilled,
+  StarFilled,
+  Flag,
+  Aim
+} from '@element-plus/icons-vue'
 import type { Segment } from '../types'
 import { getDirectionArrowCount, DEFAULT_ACTUAL_COLOR, DEFAULT_COMPARE_COLOR } from '../utils/segment'
 import { formatDistance, getA4CanvasSize, segmentPixelLength } from '../utils/mapScale'
@@ -111,6 +155,22 @@ const segmentColors = [
   '#FFB800'
 ]
 
+type MarkerType =
+  | 'landmark'
+  | 'note'
+  | 'photo'
+  | 'warning'
+  | 'checkpoint'
+  | 'milestone'
+  | 'flag'
+  | 'target'
+
+interface MarkerMenuItem {
+  type: MarkerType
+  label: string
+  icon: Component
+}
+
 export default defineComponent({
   name: 'Canvas',
   components: {
@@ -125,7 +185,9 @@ export default defineComponent({
     landmarkSizeNuber: { type: Number, required: true },
     LineWidthNuber: { type: Number, required: true },
     arrowSizeNuber: { type: Number, default: 1 },
+    trackOpacity: { type: Number, default: 1 },
     markerOpacity: { type: Number, default: 0.7 },
+    routeDistanceOpacity: { type: Number, default: 0.88 },
     drawing: { type: Boolean, required: true },
     landmarkMode: { type: Boolean, default: false },
     imageSrc: { type: [String, null], required: true },
@@ -144,6 +206,7 @@ export default defineComponent({
     const errorMessage = ref('')
     const viewScale = ref(1)
     const offset = ref({ x: 0, y: 0 })
+    const viewScaleMin = 0.25
     const viewScaleMax = 10
     let resizeObserver: ResizeObserver | null = null
 
@@ -247,14 +310,33 @@ export default defineComponent({
     const markerDropdown = ref(null)
     const markerMenuVisible = ref(false)
     const markerDialogVisible = ref(false)
-    const markerForm = ref({ type: '', content: '' })
-    const markerTypes = [
-      { type: 'landmark', label: '参考物', icon: '📍' },
-      { type: 'note', label: '备注', icon: '📝' },
-      { type: 'photo', label: '照片', icon: '📷' },
-      { type: 'warning', label: '警告', icon: '⚠' },
-      { type: 'checkpoint', label: '检查点', icon: '✓' },
-      { type: 'milestone', label: '里程碑', icon: '★' }
+    const markerForm = ref<{ type: MarkerType | ''; content: string; color: string }>({
+      type: '',
+      content: '',
+      color: '#e6a23c'
+    })
+    const lastMarkerType = ref<MarkerType>('landmark')
+    const lastMarkerColor = ref('#e6a23c')
+    const markerTypes: MarkerMenuItem[] = [
+      { type: 'landmark', label: '参考物', icon: LocationFilled },
+      { type: 'flag', label: '旗标', icon: Flag },
+      { type: 'target', label: '目标点', icon: Aim },
+      { type: 'note', label: '备注', icon: Memo },
+      { type: 'photo', label: '照片', icon: PictureFilled },
+      { type: 'warning', label: '警告', icon: WarningFilled },
+      { type: 'checkpoint', label: '检查点', icon: CircleCheckFilled },
+      { type: 'milestone', label: '里程碑', icon: StarFilled }
+    ]
+    const markerColorPresets = [
+      '#e6a23c',
+      '#409eff',
+      '#67c23a',
+      '#f56c6c',
+      '#909399',
+      '#00a870',
+      '#7c3aed',
+      '#d81e5b',
+      '#303133'
     ]
 
     // 移动端触摸事件状态
@@ -274,8 +356,9 @@ export default defineComponent({
 
       if (props.landmarkMode) {
         currentMarkerPosition = { x: realX, y: realY }
-        markerForm.value.type = 'landmark'
+        markerForm.value.type = lastMarkerType.value
         markerForm.value.content = ''
+        markerForm.value.color = lastMarkerColor.value
         markerDialogVisible.value = true
         return
       }
@@ -294,24 +377,60 @@ export default defineComponent({
       showMarkerMenu(e.clientX, e.clientY)
     }
 
+    function getDefaultMarkerColor(type: string) {
+      const colors = {
+        landmark: '#e6a23c',
+        note: '#409eff',
+        photo: '#67c23a',
+        warning: '#f56c6c',
+        checkpoint: '#e6a23c',
+        milestone: '#909399',
+        flag: '#00a870',
+        target: '#7c3aed'
+      }
+      return colors[type as keyof typeof colors] || '#409eff'
+    }
+
+    function normalizeColor(value: string | null | undefined) {
+      const color = typeof value === 'string' ? value.trim() : ''
+      return color || null
+    }
+
+    function updateMarkerColor(value: string | null | undefined) {
+      const color = normalizeColor(value)
+      if (!color) return
+      markerForm.value.color = color
+      lastMarkerColor.value = color
+    }
+
     function showMarkerMenu(x: number, y: number) {
       markerForm.value.type = ''
       markerForm.value.content = ''
+      markerForm.value.color = lastMarkerColor.value
       markerMenuVisible.value = true
     }
 
-    function selectMarkerType(markerType: { type: string; label: string; icon: string }) {
+    function selectMarkerType(markerType: MarkerMenuItem) {
       markerForm.value.type = markerType.type
+      lastMarkerType.value = markerType.type
+      updateMarkerColor(getDefaultMarkerColor(markerType.type))
       markerMenuVisible.value = false
       markerDialogVisible.value = true
     }
 
+    function onMarkerTypeChange(type: MarkerType) {
+      updateMarkerColor(getDefaultMarkerColor(type))
+    }
+
     function confirmAddMarker() {
       if (markerForm.value.type) {
+        lastMarkerType.value = markerForm.value.type
+        lastMarkerColor.value = markerForm.value.color
         emit('add-marker', {
           x: currentMarkerPosition.x,
           y: currentMarkerPosition.y,
           type: markerForm.value.type,
+          color: markerForm.value.color,
           content: markerForm.value.content || ''
         })
         markerDialogVisible.value = false
@@ -325,7 +444,9 @@ export default defineComponent({
         photo: 'success',
         warning: 'danger',
         checkpoint: 'warning',
-        milestone: 'primary'
+        milestone: 'primary',
+        flag: 'success',
+        target: 'primary'
       }
       return colors[type as keyof typeof colors] || 'info'
     }
@@ -337,7 +458,9 @@ export default defineComponent({
         photo: '照片',
         warning: '警告',
         checkpoint: '检查点',
-        milestone: '里程碑'
+        milestone: '里程碑',
+        flag: '旗标',
+        target: '目标点'
       }
       return texts[type as keyof typeof texts] || '标记'
     }
@@ -504,6 +627,7 @@ export default defineComponent({
         const color = getSegmentColor(segment, segIdx)
         ctx.strokeStyle = color
         ctx.lineWidth = props.LineWidthNuber / viewScale.value
+        ctx.globalAlpha = props.trackOpacity
         const seg = segment.points
         let i = 1
         while (i < seg.length) {
@@ -533,6 +657,7 @@ export default defineComponent({
           } else {
             drawSegmentDirectionArrow(ctx, seg, color)
           }
+          ctx.globalAlpha = 1
           drawRouteDistanceLabel(ctx, segment, color)
         }
 
@@ -549,13 +674,16 @@ export default defineComponent({
               2 * Math.PI
             )
             ctx.fillStyle = color
+            ctx.globalAlpha = props.trackOpacity
             ctx.fill()
             ctx.strokeStyle = '#fff'
             ctx.lineWidth = 1.5
             ctx.stroke()
             ctx.restore()
           })
-        }        if (segment.markers) {
+        }
+        ctx.globalAlpha = 1
+        if (segment.markers) {
           segment.markers.forEach(marker => {
             drawMarker(ctx, marker)
           })
@@ -574,6 +702,7 @@ export default defineComponent({
         const color = getSegmentColor(segment, segIdx)
         ctx.strokeStyle = color
         ctx.lineWidth = props.LineWidthNuber
+        ctx.globalAlpha = props.trackOpacity
         let i = 1
         while (i < seg.length) {
           if (seg[i].type === 'curve') {
@@ -603,6 +732,7 @@ export default defineComponent({
           } else {
             drawSegmentDirectionArrow(ctx, seg, color, 1)
           }
+          ctx.globalAlpha = 1
           drawRouteDistanceLabelForExport(ctx, segment, color)
         }
         ctx.restore()
@@ -640,7 +770,7 @@ export default defineComponent({
 
     function drawMarkerForExport(
       ctx: CanvasRenderingContext2D,
-      marker: { x: number; y: number; type: string; content: string }
+      marker: { x: number; y: number; type: string; content: string; color?: string }
     ) {
       const colors = {
         landmark: '#e6a23c',
@@ -648,21 +778,13 @@ export default defineComponent({
         photo: '#67c23a',
         warning: '#f56c6c',
         checkpoint: '#e6a23c',
-        milestone: '#909399'
+        milestone: '#909399',
+        flag: '#00a870',
+        target: '#7c3aed'
       }
-      const color = colors[marker.type as keyof typeof colors] || '#409eff'
+      const color = marker.color || colors[marker.type as keyof typeof colors] || '#409eff'
       ctx.save()
-      if (marker.type === 'landmark') {
-        drawPinAt(ctx, marker.x, marker.y, color, props.landmarkSizeNuber)
-      } else {
-        ctx.beginPath()
-        ctx.arc(marker.x, marker.y, props.pointSizeNuber, 0, 2 * Math.PI)
-        ctx.fillStyle = color
-        ctx.fill()
-        ctx.strokeStyle = '#fff'
-        ctx.lineWidth = props.LineWidthNuber
-        ctx.stroke()
-      }
+      drawMarkerShapeAt(ctx, marker.x, marker.y, marker.type, color, props.landmarkSizeNuber)
       ctx.restore()
     }
 
@@ -849,11 +971,11 @@ export default defineComponent({
       const height = fontSize + padY * 2
       const bx = x - width / 2
       const by = y - gap - height
-      ctx.globalAlpha = 0.88
+      ctx.globalAlpha = props.routeDistanceOpacity
       ctx.fillStyle = color
       roundRect(ctx, bx, by, width, height, 4 * scale)
       ctx.fill()
-      ctx.globalAlpha = 1
+      ctx.globalAlpha = Math.min(1, props.routeDistanceOpacity + 0.12)
       ctx.strokeStyle = '#ffffff'
       ctx.lineWidth = Math.max(1, scale)
       ctx.stroke()
@@ -914,7 +1036,7 @@ export default defineComponent({
     }
     function drawMarker(
       ctx: CanvasRenderingContext2D,
-      marker: { x: number; y: number; type: string; content: string }
+      marker: { x: number; y: number; type: string; content: string; color?: string }
     ) {
       const colors = {
         landmark: '#e6a23c',
@@ -922,44 +1044,25 @@ export default defineComponent({
         photo: '#67c23a',
         warning: '#f56c6c',
         checkpoint: '#e6a23c',
-        milestone: '#909399'
+        milestone: '#909399',
+        flag: '#00a870',
+        target: '#7c3aed'
       }
-      const color = colors[marker.type as keyof typeof colors] || '#409eff'
+      const color = marker.color || colors[marker.type as keyof typeof colors] || '#409eff'
       const sx = marker.x * viewScale.value + offset.value.x
       const sy = marker.y * viewScale.value + offset.value.y
 
       ctx.save()
       ctx.setTransform(1, 0, 0, 1, 0, 0)
 
-      let pinTopY = sy
-      if (marker.type === 'landmark') {
-        drawPinAt(ctx, sx, sy, color, props.landmarkSizeNuber)
-        const r = props.landmarkSizeNuber * 0.4
-        const pinHeight = r * 2.2
-        pinTopY = sy - pinHeight - r
-      } else {
-        ctx.beginPath()
-        ctx.arc(sx, sy, props.pointSizeNuber, 0, 2 * Math.PI)
-        ctx.fillStyle = color
-        ctx.fill()
-        ctx.strokeStyle = '#fff'
-        ctx.lineWidth = props.LineWidthNuber
-        ctx.stroke()
-        const icons = {
-          note: '📝',
-          photo: '📷',
-          warning: '⚠',
-          checkpoint: '✓',
-          milestone: '★'
-        }
-        const icon = icons[marker.type as keyof typeof icons] || '📍'
-        ctx.fillStyle = '#fff'
-        ctx.font = '12px Arial'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(icon, sx, sy)
-        pinTopY = sy - props.pointSizeNuber
-      }
+      const pinTopY = drawMarkerShapeAt(
+        ctx,
+        sx,
+        sy,
+        marker.type,
+        color,
+        props.landmarkSizeNuber
+      )
 
       if (marker.content) {
         drawMarkerLabel(ctx, sx, pinTopY, marker.content, color)
@@ -1019,6 +1122,61 @@ export default defineComponent({
       ctx.closePath()
     }
 
+    function getMarkerVisualSize(size: number) {
+      return clamp(size, 12, 96)
+    }
+
+    function drawMarkerShapeAt(
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      type: string,
+      color: string,
+      size: number
+    ) {
+      if (type === 'flag') {
+        return drawFlagMarkerAt(ctx, x, y, color, size)
+      }
+      if (type === 'target') {
+        return drawTargetMarkerAt(ctx, x, y, color, size)
+      }
+      if (type === 'landmark') {
+        return drawPinAt(ctx, x, y, color, size)
+      }
+
+      const radius = Math.max(props.pointSizeNuber + 3, getMarkerVisualSize(size) * 0.34)
+      ctx.save()
+      ctx.globalAlpha = props.markerOpacity
+      ctx.beginPath()
+      ctx.arc(x, y, radius, 0, 2 * Math.PI)
+      ctx.fillStyle = color
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.22)'
+      ctx.shadowBlur = 5
+      ctx.shadowOffsetY = 2
+      ctx.fill()
+      ctx.shadowColor = 'transparent'
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      const icons = {
+        note: 'i',
+        photo: 'P',
+        warning: '!',
+        checkpoint: '✓',
+        milestone: '★'
+      }
+      const icon = icons[type as keyof typeof icons] || 'i'
+      ctx.fillStyle = '#fff'
+      ctx.font = `700 ${Math.max(12, radius * 0.9)}px Arial`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(icon, x, y + 0.5)
+      ctx.restore()
+
+      return y - radius
+    }
+
     function drawPinAt(
       ctx: CanvasRenderingContext2D,
       x: number,
@@ -1026,31 +1184,134 @@ export default defineComponent({
       color: string,
       size: number
     ) {
-      const r = size * 0.4
-      const pinHeight = r * 2.2
+      const markerSize = getMarkerVisualSize(size)
+      const r = markerSize * 0.38
+      const centerY = y - r * 1.45
       ctx.save()
+      ctx.globalAlpha = props.markerOpacity
       ctx.fillStyle = color
       ctx.strokeStyle = '#fff'
       ctx.lineWidth = 2
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.24)'
+      ctx.shadowBlur = 6
+      ctx.shadowOffsetY = 2
       ctx.beginPath()
       ctx.moveTo(x, y)
       ctx.bezierCurveTo(
-        x - r * 0.8,
-        y - r * 1.2,
-        x - r,
-        y - pinHeight + r * 0.3,
-        x,
-        y - pinHeight + r
+        x - r * 0.95,
+        y - r * 0.75,
+        x - r * 1.05,
+        centerY + r * 0.32,
+        x - r * 0.92,
+        centerY
       )
-      ctx.arc(x, y - pinHeight + r, r, Math.PI, 0, false)
-      ctx.bezierCurveTo(x + r, y - pinHeight + r * 0.3, x + r * 0.8, y - r * 1.2, x, y)
+      ctx.bezierCurveTo(x - r * 0.92, centerY - r * 0.72, x - r * 0.45, centerY - r, x, centerY - r)
+      ctx.bezierCurveTo(x + r * 0.45, centerY - r, x + r * 0.92, centerY - r * 0.72, x + r * 0.92, centerY)
+      ctx.bezierCurveTo(x + r * 1.05, centerY + r * 0.32, x + r * 0.95, y - r * 0.75, x, y)
+      ctx.closePath()
       ctx.fill()
+      ctx.shadowColor = 'transparent'
       ctx.stroke()
       ctx.beginPath()
-      ctx.arc(x, y - pinHeight + r, r * 0.35, 0, Math.PI * 2)
+      ctx.arc(x, centerY, r * 0.36, 0, Math.PI * 2)
       ctx.fillStyle = '#fff'
       ctx.fill()
       ctx.restore()
+      return centerY - r
+    }
+
+    function drawFlagMarkerAt(
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      color: string,
+      size: number
+    ) {
+      const markerSize = getMarkerVisualSize(size)
+      const poleHeight = markerSize * 1.25
+      const flagW = markerSize * 0.8
+      const flagH = markerSize * 0.45
+      const topY = y - poleHeight
+      ctx.save()
+      ctx.globalAlpha = props.markerOpacity
+      ctx.lineCap = 'round'
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 5
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.lineTo(x, topY)
+      ctx.stroke()
+      ctx.strokeStyle = color
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.lineTo(x, topY)
+      ctx.stroke()
+
+      ctx.beginPath()
+      ctx.moveTo(x, topY)
+      ctx.lineTo(x + flagW, topY + flagH * 0.18)
+      ctx.lineTo(x, topY + flagH)
+      ctx.closePath()
+      ctx.fillStyle = color
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.2)'
+      ctx.shadowBlur = 4
+      ctx.shadowOffsetY = 2
+      ctx.fill()
+      ctx.shadowColor = 'transparent'
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      ctx.beginPath()
+      ctx.arc(x, y, 4, 0, Math.PI * 2)
+      ctx.fillStyle = color
+      ctx.fill()
+      ctx.restore()
+      return topY
+    }
+
+    function drawTargetMarkerAt(
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      color: string,
+      size: number
+    ) {
+      const markerSize = getMarkerVisualSize(size)
+      const radius = markerSize * 0.38
+      ctx.save()
+      ctx.globalAlpha = props.markerOpacity
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.94)'
+      ctx.strokeStyle = color
+      ctx.lineWidth = 3
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.2)'
+      ctx.shadowBlur = 5
+      ctx.shadowOffsetY = 2
+      ctx.beginPath()
+      ctx.arc(x, y, radius, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.shadowColor = 'transparent'
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(x, y, radius * 0.52, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(x - radius * 1.25, y)
+      ctx.lineTo(x - radius * 0.72, y)
+      ctx.moveTo(x + radius * 0.72, y)
+      ctx.lineTo(x + radius * 1.25, y)
+      ctx.moveTo(x, y - radius * 1.25)
+      ctx.lineTo(x, y - radius * 0.72)
+      ctx.moveTo(x, y + radius * 0.72)
+      ctx.lineTo(x, y + radius * 1.25)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(x, y, radius * 0.18, 0, Math.PI * 2)
+      ctx.fillStyle = color
+      ctx.fill()
+      ctx.restore()
+      return y - radius * 1.25
     }
 
     function drawAll() {
@@ -1201,8 +1462,9 @@ export default defineComponent({
         const realY = (y - offset.value.y) / viewScale.value
         if (props.landmarkMode) {
           currentMarkerPosition = { x: realX, y: realY }
-          markerForm.value.type = 'landmark'
+          markerForm.value.type = lastMarkerType.value
           markerForm.value.content = ''
+          markerForm.value.color = lastMarkerColor.value
           markerDialogVisible.value = true
         } else if (props.drawing) {
           emit('add-point', { x: realX, y: realY })
@@ -1287,8 +1549,11 @@ export default defineComponent({
       markerDialogVisible,
       markerForm,
       markerTypes,
+      markerColorPresets,
       showMarkerMenu,
       selectMarkerType,
+      onMarkerTypeChange,
+      updateMarkerColor,
       confirmAddMarker,
       onMarkerMenuVisibleChange,
       getMarkerTypeColor,
@@ -1380,9 +1645,49 @@ export default defineComponent({
     font-size: 16px;
   }
 }
+
+.marker-menu-icon {
+  margin-right: 8px;
+  vertical-align: -2px;
+}
+
+.marker-style-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  :deep(.el-radio-button__inner) {
+    border-left: 1px solid var(--el-border-color) !important;
+    border-radius: 6px !important;
+    padding: 7px 10px;
+  }
+}
+
+.marker-style-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.marker-color-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.marker-color-preset {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #dcdfe6;
+  cursor: pointer;
+
+  &.is-selected {
+    box-shadow:
+      0 0 0 2px #303133,
+      0 0 0 4px #fff;
+  }
+}
 </style>
-
-
-
-
-

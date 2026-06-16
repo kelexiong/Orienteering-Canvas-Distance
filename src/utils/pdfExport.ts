@@ -222,7 +222,9 @@ export class PDFExporter {
       photo: '照片',
       warning: '警告',
       checkpoint: '检查点',
-      milestone: '里程碑'
+      milestone: '里程碑',
+      flag: '旗标',
+      target: '目标点'
     }
     return typeMap[type] || '标记'
   }

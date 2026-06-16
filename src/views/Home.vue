@@ -6,11 +6,7 @@
         <span class="title">定向越野绘图笔记</span>
       </div>
       <div class="actions desktop-actions">
-        <el-button
-          :type="drawing ? 'warning' : 'success'"
-          @click="onToggleDrawing"
-          class="tb-btn"
-        >
+        <el-button :type="drawing ? 'warning' : 'success'" @click="onToggleDrawing" class="tb-btn">
           <el-icon><Edit /></el-icon>
           <span>{{ drawing ? '结束绘制' : '开始绘制' }}</span>
         </el-button>
@@ -22,21 +18,11 @@
             </el-button>
           </template>
         </el-popconfirm>
-        <el-button
-          class="tb-btn"
-          :disabled="!canUndo"
-          title="撤销 Ctrl+Z"
-          @click="undo"
-        >
+        <el-button class="tb-btn" :disabled="!canUndo" title="撤销 Ctrl+Z" @click="undo">
           <el-icon><RefreshLeft /></el-icon>
           <span>撤销</span>
         </el-button>
-        <el-button
-          class="tb-btn"
-          :disabled="!canRedo"
-          title="重做 Ctrl+Y"
-          @click="redo"
-        >
+        <el-button class="tb-btn" :disabled="!canRedo" title="重做 Ctrl+Y" @click="redo">
           <el-icon><RefreshRight /></el-icon>
           <span>重做</span>
         </el-button>
@@ -48,10 +34,7 @@
           <el-icon><Refresh /></el-icon>
           <span>旋转</span>
         </el-button>
-        <el-button
-          class="tb-btn"
-          @click="drawMode = drawMode === 'line' ? 'curve' : 'line'"
-        >
+        <el-button class="tb-btn" @click="drawMode = drawMode === 'line' ? 'curve' : 'line'">
           <el-icon><Connection /></el-icon>
           <span>{{ drawMode === 'line' ? '曲线' : '直线' }}</span>
         </el-button>
@@ -61,7 +44,7 @@
           @click="toggleLandmarkMode"
         >
           <el-icon><LocationFilled /></el-icon>
-          <span>{{ landmarkMode ? '图钉中' : '参考物' }}</span>
+          <span>{{ landmarkMode ? '图钉中' : '图钉' }}</span>
         </el-button>
         <el-button type="primary" plain class="tb-btn" @click="addSegmentGroup">
           <el-icon><Plus /></el-icon>
@@ -94,7 +77,9 @@
           :landmarkSizeNuber="landmarkSizeNuber"
           :LineWidthNuber="LineWidthNuber"
           :arrowSizeNuber="arrowSizeNuber"
+          :track-opacity="trackOpacity"
           :markerOpacity="markerOpacity"
+          :route-distance-opacity="routeDistanceOpacity"
           :drawing="drawing"
           :landmark-mode="landmarkMode"
           :image-src="imageSrc"
@@ -108,11 +93,7 @@
         />
       </section>
 
-      <div
-        v-if="isMobile && panelDrawerVisible"
-        class="side-panel-mask"
-        @click="closePanel"
-      ></div>
+      <div v-if="isMobile && panelDrawerVisible" class="side-panel-mask" @click="closePanel"></div>
 
       <aside
         class="side-panel"
@@ -146,7 +127,9 @@
             :line-width="LineWidthNuber"
             :landmark-size="landmarkSizeNuber"
             :arrow-size="arrowSizeNuber"
+            :track-opacity="trackOpacity"
             :marker-opacity="markerOpacity"
+            :route-distance-opacity="routeDistanceOpacity"
             @toggle-drawing="onToggleDrawing"
             @clear-points="clearPoints"
             @upload-image="triggerImageUpload"
@@ -163,7 +146,9 @@
             @update:line-width="LineWidthNuber = $event"
             @update:landmark-size="landmarkSizeNuber = $event"
             @update:arrow-size="arrowSizeNuber = $event"
+            @update:track-opacity="trackOpacity = $event"
             @update:marker-opacity="markerOpacity = $event"
+            @update:route-distance-opacity="routeDistanceOpacity = $event"
           />
           <el-divider class="drawer-divider">轨迹记录</el-divider>
           <DiaryList
@@ -384,7 +369,7 @@ export default defineComponent({
       undoStack.value.push(createHistorySnapshot())
       if (undoStack.value.length > historyLimit) undoStack.value.shift()
       redoStack.value = []
-      lastHistoryKey.value = mergeConsecutive ? key ?? null : null
+      lastHistoryKey.value = mergeConsecutive ? (key ?? null) : null
     }
 
     const canUndo = computed(() => undoStack.value.length > 0)
@@ -672,10 +657,12 @@ export default defineComponent({
     const mapScalePresets = MAP_SCALE_PRESETS
     const landmarkMode = ref(false)
     const pointSizeNuber = ref(2)
-    const landmarkSizeNuber = ref(10)
+    const landmarkSizeNuber = ref(28)
     const LineWidthNuber = ref(2)
     const arrowSizeNuber = ref(1)
+    const trackOpacity = ref(1)
     const markerOpacity = ref(0.7)
+    const routeDistanceOpacity = ref(0.88)
     const canvasWidth = computed(() => 842)
     const canvasHeight = computed(() => 595)
 
@@ -965,10 +952,13 @@ export default defineComponent({
       pointSizeNuber,
       LineWidthNuber,
       arrowSizeNuber,
+      trackOpacity,
       markerOpacity,
+      routeDistanceOpacity,
       drawing,
       imageSrc,
       clearPoints,
+      confirmClearPoints,
       removePoint,
       addPoint,
       fileInput,

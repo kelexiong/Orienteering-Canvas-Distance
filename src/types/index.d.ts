@@ -20,7 +20,15 @@ export interface Marker {
   id: string
   x: number
   y: number
-  type: 'landmark' | 'note' | 'photo' | 'warning' | 'checkpoint' | 'milestone'
+  type:
+    | 'landmark'
+    | 'note'
+    | 'photo'
+    | 'warning'
+    | 'checkpoint'
+    | 'milestone'
+    | 'flag'
+    | 'target'
   content: string
   timestamp: Date
   color?: string
