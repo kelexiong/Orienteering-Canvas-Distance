@@ -322,10 +322,10 @@ export default defineComponent({
       { type: 'flag', label: '旗标', icon: Flag },
       { type: 'target', label: '目标点', icon: Aim },
       { type: 'note', label: '备注', icon: Memo },
-      { type: 'photo', label: '照片', icon: PictureFilled },
-      { type: 'warning', label: '警告', icon: WarningFilled },
+      // { type: 'photo', label: '照片', icon: PictureFilled },
+      // { type: 'warning', label: '警告', icon: WarningFilled },
       { type: 'checkpoint', label: '检查点', icon: CircleCheckFilled },
-      { type: 'milestone', label: '里程碑', icon: StarFilled }
+      // { type: 'milestone', label: '里程碑', icon: StarFilled }
     ]
     const markerColorPresets = [
       '#e6a23c',
@@ -455,10 +455,10 @@ export default defineComponent({
       const texts = {
         landmark: '参考物',
         note: '备注',
-        photo: '照片',
-        warning: '警告',
+        photo: '照片（已隐藏）',
+        warning: '警告（已隐藏）',
         checkpoint: '检查点',
-        milestone: '里程碑',
+        milestone: '里程碑（已隐藏）',
         flag: '旗标',
         target: '目标点'
       }
